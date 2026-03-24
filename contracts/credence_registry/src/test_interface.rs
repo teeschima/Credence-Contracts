@@ -1,11 +1,11 @@
 #![cfg(test)]
 
-use soroban_sdk::{testutils::Address as _, Env};
 use crate::{CredenceRegistry, CredenceRegistryClient, IFACE_CREDENCE_BOND_V1};
+use soroban_sdk::{testutils::Address as _, Env};
 
 mod compliant {
-    use soroban_sdk::{contract, contractimpl, Env};
     use crate::IFACE_CREDENCE_BOND_V1;
+    use soroban_sdk::{contract, contractimpl, Env};
     #[contract]
     pub struct CompliantBond;
     #[contractimpl]
@@ -22,7 +22,9 @@ mod non_compliant {
     pub struct NonCompliantBond;
     #[contractimpl]
     impl NonCompliantBond {
-        pub fn some_other_fn(_e: Env) -> bool { true }
+        pub fn some_other_fn(_e: Env) -> bool {
+            true
+        }
     }
 }
 
@@ -32,7 +34,9 @@ mod lying {
     pub struct LyingBond;
     #[contractimpl]
     impl LyingBond {
-        pub fn supports_interface(_e: Env, _interface_id: u32) -> bool { false }
+        pub fn supports_interface(_e: Env, _interface_id: u32) -> bool {
+            false
+        }
     }
 }
 

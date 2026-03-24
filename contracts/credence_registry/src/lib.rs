@@ -114,7 +114,12 @@ impl CredenceRegistry {
     ///
     /// # Events
     /// Emits `identity_registered` with the `RegistryEntry`
-    pub fn register(e: Env, identity: Address, bond_contract: Address, allow_non_interface: bool) -> RegistryEntry {
+    pub fn register(
+        e: Env,
+        identity: Address,
+        bond_contract: Address,
+        allow_non_interface: bool,
+    ) -> RegistryEntry {
         pausable::require_not_paused(&e);
         // Verify admin authorization
         let admin: Address = e
@@ -186,8 +191,10 @@ impl CredenceRegistry {
         }
 
         // Emit event
-        e.events()
-            .publish((Symbol::new(&e, "identity_registered"),), (entry.clone(), allow_non_interface));
+        e.events().publish(
+            (Symbol::new(&e, "identity_registered"),),
+            (entry.clone(), allow_non_interface),
+        );
 
         entry
     }
