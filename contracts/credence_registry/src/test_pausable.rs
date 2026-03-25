@@ -30,14 +30,16 @@ fn test_pause_blocks_state_changes_but_allows_reads() {
     let identity = Address::generate(&env);
     let bond_contract = Address::generate(&env);
 
-    assert!(client.try_register(&identity, &bond_contract).is_err());
+    assert!(client
+        .try_register(&identity, &bond_contract, &true)
+        .is_err());
 
     // Unpause
     client.unpause(&admin);
     assert!(!client.is_paused());
 
     // State change works again
-    let _entry = client.register(&identity, &bond_contract);
+    let _entry = client.register(&identity, &bond_contract, &true);
 }
 
 #[test]

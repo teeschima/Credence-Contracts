@@ -20,6 +20,22 @@ mod types;
 use errors::*;
 use types::{DataKey, FeeConfig, FixedBond};
 
+// Checked basis-point helpers used only inside this module.
+#[inline]
+fn checked_mul_i128(a: i128, b: i128, msg: &'static str) -> i128 {
+    a.checked_mul(b).unwrap_or_else(|| panic!("{msg}"))
+}
+
+#[inline]
+fn checked_add_i128(a: i128, b: i128, msg: &'static str) -> i128 {
+    a.checked_add(b).unwrap_or_else(|| panic!("{msg}"))
+}
+
+#[inline]
+fn checked_sub_i128(a: i128, b: i128, msg: &'static str) -> i128 {
+    a.checked_sub(b).unwrap_or_else(|| panic!("{msg}"))
+}
+
 use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, Env, Symbol};
 
 #[cfg(test)]
@@ -27,6 +43,9 @@ mod test_helpers;
 
 #[cfg(test)]
 mod tests;
+
+/// Maximum fee in basis points (1000 = 10%).
+pub const MAX_FEE_BPS: u32 = 1000;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -50,9 +69,17 @@ fn get_token(e: &Env) -> Address {
 }
 
 /// Apply basis-point fee: returns `(fee, net)`.
+///
+/// Uses checked arithmetic throughout:
+/// - `amount * bps` uses `checked_mul` to catch intermediate overflow
+///   (e.g. very large deposits with non-zero bps).
+/// - The net `amount - fee` uses `checked_sub` even though the result is
+///   mathematically non-negative, so any future change to call sites cannot
+///   silently wrap.
 fn apply_bps(amount: i128, bps: u32) -> (i128, i128) {
-    let fee = amount * (bps as i128) / 10_000_i128;
-    (fee, amount - fee)
+    let fee = checked_mul_i128(amount, bps as i128, ERR_FEE_MUL_OVERFLOW) / 10_000_i128;
+    let net = checked_sub_i128(amount, fee, "fee net underflow");
+    (fee, net)
 }
 
 // ─── Contract ──────────────────────────────────────────────────────────────
@@ -78,8 +105,23 @@ impl FixedDurationBond {
     /// `fee_bps` = 0 effectively disables the fee.
     pub fn set_fee_config(e: Env, admin: Address, treasury: Address, fee_bps: u32) {
         require_admin(&e, &admin);
+        if fee_bps > MAX_FEE_BPS {
+            panic!("{}", ERR_FEE_BPS_TOO_HIGH);
+        }
+
+        let previous: Option<FeeConfig> = e.storage().instance().get(&DataKey::FeeConfig);
         let cfg = FeeConfig { treasury, fee_bps };
         e.storage().instance().set(&DataKey::FeeConfig, &cfg);
+
+        let (old_treasury, old_fee_bps) = match previous {
+            Some(prev) => (Some(prev.treasury), prev.fee_bps),
+            None => (None, 0_u32),
+        };
+
+        e.events().publish(
+            (Symbol::new(&e, "fee_config_updated"),),
+            (old_treasury, old_fee_bps, cfg.treasury, cfg.fee_bps),
+        );
     }
 
     /// Set the default early-exit penalty applied when `withdraw_early` is called.
@@ -174,9 +216,11 @@ impl FixedDurationBond {
                     .instance()
                     .get(&DataKey::AccruedFees)
                     .unwrap_or(0);
+                let new_fees =
+                    checked_add_i128(prev_fees, fee, ERR_FEE_ACCRUE_OVERFLOW);
                 e.storage()
                     .instance()
-                    .set(&DataKey::AccruedFees, &(prev_fees + fee));
+                    .set(&DataKey::AccruedFees, &new_fees);
                 net
             } else {
                 amount

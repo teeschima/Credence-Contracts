@@ -34,7 +34,7 @@ fn test_initialize() {
 }
 
 #[test]
-#[should_panic(expected = "already initialized")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_initialize_twice_should_fail() {
     let env = Env::default();
     let admin = Address::generate(&env);
@@ -58,7 +58,7 @@ fn test_register_identity() {
 
     env.mock_all_auths();
 
-    let entry = client.register(&identity, &bond_contract);
+    let entry = client.register(&identity, &bond_contract, &true);
 
     assert_eq!(entry.identity, identity);
     assert_eq!(entry.bond_contract, bond_contract);
@@ -66,7 +66,7 @@ fn test_register_identity() {
 }
 
 #[test]
-#[should_panic(expected = "identity already registered")]
+#[should_panic(expected = "Error(Contract, #400)")]
 fn test_register_duplicate_identity() {
     let (env, contract_id, _admin) = setup_registry();
     let client = CredenceRegistryClient::new(&env, &contract_id);
@@ -77,12 +77,12 @@ fn test_register_duplicate_identity() {
 
     env.mock_all_auths();
 
-    client.register(&identity, &bond_contract1);
-    client.register(&identity, &bond_contract2); // Should panic
+    client.register(&identity, &bond_contract1, &true);
+    client.register(&identity, &bond_contract2, &true); // Should panic
 }
 
 #[test]
-#[should_panic(expected = "bond contract already registered")]
+#[should_panic(expected = "Error(Contract, #401)")]
 fn test_register_duplicate_bond_contract() {
     let (env, contract_id, _admin) = setup_registry();
     let client = CredenceRegistryClient::new(&env, &contract_id);
@@ -93,8 +93,8 @@ fn test_register_duplicate_bond_contract() {
 
     env.mock_all_auths();
 
-    client.register(&identity1, &bond_contract);
-    client.register(&identity2, &bond_contract); // Should panic
+    client.register(&identity1, &bond_contract, &true);
+    client.register(&identity2, &bond_contract, &true); // Should panic
 }
 
 #[test]
@@ -107,7 +107,7 @@ fn test_get_bond_contract() {
 
     env.mock_all_auths();
 
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
 
     let entry = client.get_bond_contract(&identity);
     assert_eq!(entry.bond_contract, bond_contract);
@@ -115,7 +115,7 @@ fn test_get_bond_contract() {
 }
 
 #[test]
-#[should_panic(expected = "identity not registered")]
+#[should_panic(expected = "Error(Contract, #402)")]
 fn test_get_bond_contract_not_registered() {
     let (env, contract_id, _admin) = setup_registry();
     let client = CredenceRegistryClient::new(&env, &contract_id);
@@ -135,14 +135,14 @@ fn test_get_identity_reverse_lookup() {
 
     env.mock_all_auths();
 
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
 
     let found_identity = client.get_identity(&bond_contract);
     assert_eq!(found_identity, identity);
 }
 
 #[test]
-#[should_panic(expected = "bond contract not registered")]
+#[should_panic(expected = "Error(Contract, #403)")]
 fn test_get_identity_not_registered() {
     let (env, contract_id, _admin) = setup_registry();
     let client = CredenceRegistryClient::new(&env, &contract_id);
@@ -166,7 +166,7 @@ fn test_is_registered() {
     assert!(!client.is_registered(&identity));
 
     // Register
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
 
     // Now registered
     assert!(client.is_registered(&identity));
@@ -182,7 +182,7 @@ fn test_deactivate() {
 
     env.mock_all_auths();
 
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
     assert!(client.is_registered(&identity));
 
     client.deactivate(&identity);
@@ -194,7 +194,7 @@ fn test_deactivate() {
 }
 
 #[test]
-#[should_panic(expected = "already deactivated")]
+#[should_panic(expected = "Error(Contract, #404)")]
 fn test_deactivate_twice() {
     let (env, contract_id, _admin) = setup_registry();
     let client = CredenceRegistryClient::new(&env, &contract_id);
@@ -204,7 +204,7 @@ fn test_deactivate_twice() {
 
     env.mock_all_auths();
 
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
     client.deactivate(&identity);
     client.deactivate(&identity); // Should panic
 }
@@ -219,7 +219,7 @@ fn test_reactivate() {
 
     env.mock_all_auths();
 
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
     client.deactivate(&identity);
     assert!(!client.is_registered(&identity));
 
@@ -231,7 +231,7 @@ fn test_reactivate() {
 }
 
 #[test]
-#[should_panic(expected = "already active")]
+#[should_panic(expected = "Error(Contract, #405)")]
 fn test_reactivate_already_active() {
     let (env, contract_id, _admin) = setup_registry();
     let client = CredenceRegistryClient::new(&env, &contract_id);
@@ -241,7 +241,7 @@ fn test_reactivate_already_active() {
 
     env.mock_all_auths();
 
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
     client.reactivate(&identity); // Should panic
 }
 
@@ -259,15 +259,15 @@ fn test_get_all_identities() {
     // Register multiple identities
     let identity1 = Address::generate(&env);
     let bond_contract1 = Address::generate(&env);
-    client.register(&identity1, &bond_contract1);
+    client.register(&identity1, &bond_contract1, &true);
 
     let identity2 = Address::generate(&env);
     let bond_contract2 = Address::generate(&env);
-    client.register(&identity2, &bond_contract2);
+    client.register(&identity2, &bond_contract2, &true);
 
     let identity3 = Address::generate(&env);
     let bond_contract3 = Address::generate(&env);
-    client.register(&identity3, &bond_contract3);
+    client.register(&identity3, &bond_contract3, &true);
 
     let identities = client.get_all_identities();
     assert_eq!(identities.len(), 3);
@@ -304,7 +304,7 @@ fn test_admin_only_operations() {
     env.mock_all_auths();
 
     // Admin can register
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
 
     // Admin can deactivate
     client.deactivate(&identity);
@@ -327,7 +327,7 @@ fn test_bidirectional_lookup() {
 
     env.mock_all_auths();
 
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
 
     // Forward lookup: identity -> bond contract
     let entry = client.get_bond_contract(&identity);
@@ -350,7 +350,7 @@ fn test_multiple_registrations() {
         let identity = Address::generate(&env);
         let bond_contract = Address::generate(&env);
 
-        client.register(&identity, &bond_contract);
+        client.register(&identity, &bond_contract, &true);
 
         // Verify forward lookup
         let entry = client.get_bond_contract(&identity);
@@ -379,7 +379,7 @@ fn test_deactivate_and_reactivate_preserves_mapping() {
 
     env.mock_all_auths();
 
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
 
     // Deactivate
     client.deactivate(&identity);
@@ -413,7 +413,7 @@ fn test_timestamp_on_registration() {
 
     let before_timestamp = env.ledger().timestamp();
 
-    client.register(&identity, &bond_contract);
+    client.register(&identity, &bond_contract, &true);
 
     let entry = client.get_bond_contract(&identity);
 

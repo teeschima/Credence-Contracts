@@ -15,3 +15,6 @@ pub const ERR_INSUFFICIENT_BALANCE: &str = "insufficient bond balance";
 pub const ERR_TOKEN_NOT_SET: &str = "token not set";
 pub const ERR_NO_FEES: &str = "no fees to collect";
 pub const ERR_PENALTY_NOT_CONFIGURED: &str = "early-exit penalty not configured";
+pub const ERR_FEE_BPS_TOO_HIGH: &str = "fee_bps must be <= 1000 (10%)";
+pub const ERR_FEE_MUL_OVERFLOW: &str = "fee calculation overflow";
+pub const ERR_FEE_ACCRUE_OVERFLOW: &str = "accrued fees overflow";

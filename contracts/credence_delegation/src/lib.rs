@@ -2,7 +2,15 @@
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
+pub mod domain;
+pub mod nonce;
 pub mod pausable;
+
+pub use domain::{DelegatedActionPayload, DomainTag};
+
+// ---------------------------------------------------------------------------
+// Contract types
+// ---------------------------------------------------------------------------
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -29,6 +37,10 @@ pub struct Delegation {
     pub revoked: bool,
 }
 
+// ---------------------------------------------------------------------------
+// Storage keys
+// ---------------------------------------------------------------------------
+
 #[contracttype]
 #[derive(Clone)]
 enum DataKey {
@@ -42,7 +54,13 @@ enum DataKey {
     PauseApproval(u64, Address),
     PauseApprovalCount(u64),
     Delegation(Address, Address, DelegationType),
+    /// Per-identity nonce for replay prevention.
+    Nonce(Address),
 }
+
+// ---------------------------------------------------------------------------
+// Contract implementation
+// ---------------------------------------------------------------------------
 
 #[contract]
 pub struct CredenceDelegation;
@@ -59,13 +77,20 @@ impl CredenceDelegation {
         e.storage()
             .instance()
             .set(&DataKey::PauseSignerCount, &0_u32);
-        e.storage().instance().set(&DataKey::PauseThreshold, &0_u32);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseThreshold, &0_u32);
         e.storage()
             .instance()
             .set(&DataKey::PauseProposalCounter, &0_u64);
     }
 
+    // -----------------------------------------------------------------------
+    // Direct (auth-required) entry points — no off-chain signature needed
+    // -----------------------------------------------------------------------
+
     /// Create a delegation from owner to delegate with a given type and expiry.
+    /// The owner must be the transaction signer.
     pub fn delegate(
         e: Env,
         owner: Address,
@@ -80,21 +105,7 @@ impl CredenceDelegation {
             panic!("expiry must be in the future");
         }
 
-        let key = DataKey::Delegation(owner.clone(), delegate.clone(), delegation_type.clone());
-
-        let d = Delegation {
-            owner: owner.clone(),
-            delegate: delegate.clone(),
-            delegation_type,
-            expires_at,
-            revoked: false,
-        };
-
-        e.storage().instance().set(&key, &d);
-        e.events()
-            .publish((Symbol::new(&e, "delegation_created"),), d.clone());
-
-        d
+        Self::store_delegation(&e, owner, delegate, delegation_type, expires_at)
     }
 
     /// Revoke an existing delegation. Only the owner can revoke.
@@ -107,50 +118,123 @@ impl CredenceDelegation {
         pausable::require_not_paused(&e);
         owner.require_auth();
 
-        let key = DataKey::Delegation(owner.clone(), delegate.clone(), delegation_type.clone());
-
-        let mut d: Delegation = e
-            .storage()
-            .instance()
-            .get(&key)
-            .unwrap_or_else(|| panic!("delegation not found"));
-
-        if d.revoked {
-            panic!("already revoked");
-        }
-
-        d.revoked = true;
-        e.storage().instance().set(&key, &d);
-        e.events()
-            .publish((Symbol::new(&e, "delegation_revoked"),), d);
+        Self::mark_delegation_revoked(&e, owner, delegate, delegation_type, "delegation");
     }
 
+    /// Revoke an attestation-type delegation.  Only the original attester can revoke.
     pub fn revoke_attestation(e: Env, attester: Address, subject: Address) {
         pausable::require_not_paused(&e);
         attester.require_auth();
 
-        let key = DataKey::Delegation(
-            attester.clone(),
-            subject.clone(),
+        Self::mark_delegation_revoked(
+            &e,
+            attester,
+            subject,
             DelegationType::Attestation,
+            "attestation",
         );
+    }
 
-        let mut d: Delegation = e
-            .storage()
-            .instance()
-            .get(&key)
-            .unwrap_or_else(|| panic!("attestation not found"));
+    // -----------------------------------------------------------------------
+    // Delegated (relayer) entry points — explicit domain-separated payload
+    // -----------------------------------------------------------------------
 
-        if d.revoked {
-            panic!("attestation already revoked");
+    /// Relayer-friendly variant of `delegate`.
+    ///
+    /// A relayer submits a [`DelegatedActionPayload`] that was produced and
+    /// signed off-chain by `owner`.  The payload must carry:
+    ///
+    /// * `domain = DomainTag::Delegate` — prevents replay in revoke functions
+    /// * `owner`      — the actual authority
+    /// * `target`     — must equal `delegate`
+    /// * `contract_id`— must match this deployment (prevents cross-contract replay)
+    /// * `nonce`      — consumed and incremented on success
+    ///
+    /// `owner.require_auth()` is still called so the Soroban auth engine
+    /// validates the underlying transaction signature.
+    pub fn execute_delegated_delegate(
+        e: Env,
+        owner: Address,
+        delegate: Address,
+        delegation_type: DelegationType,
+        expires_at: u64,
+        payload: DelegatedActionPayload,
+    ) -> Delegation {
+        pausable::require_not_paused(&e);
+        owner.require_auth();
+
+        // Domain-separated payload verification
+        domain::verify_payload(&e, &payload, DomainTag::Delegate, &owner, &delegate);
+
+        // Nonce consumption (replay prevention)
+        nonce::consume_nonce(&e, &owner, payload.nonce);
+
+        if expires_at <= e.ledger().timestamp() {
+            panic!("expiry must be in the future");
         }
 
-        d.revoked = true;
-        e.storage().instance().set(&key, &d);
-
-        e.events()
-            .publish((Symbol::new(&e, "attestation_revoked"),), d);
+        Self::store_delegation(&e, owner, delegate, delegation_type, expires_at)
     }
+
+    /// Relayer-friendly variant of `revoke_delegation`.
+    ///
+    /// Payload domain must be `DomainTag::RevokeDelegation` — a signature
+    /// produced for `execute_delegated_delegate` cannot be replayed here.
+    pub fn execute_delegated_revoke(
+        e: Env,
+        owner: Address,
+        delegate: Address,
+        delegation_type: DelegationType,
+        payload: DelegatedActionPayload,
+    ) {
+        pausable::require_not_paused(&e);
+        owner.require_auth();
+
+        domain::verify_payload(
+            &e,
+            &payload,
+            DomainTag::RevokeDelegation,
+            &owner,
+            &delegate,
+        );
+        nonce::consume_nonce(&e, &owner, payload.nonce);
+
+        Self::mark_delegation_revoked(&e, owner, delegate, delegation_type, "delegation");
+    }
+
+    /// Relayer-friendly variant of `revoke_attestation`.
+    ///
+    /// Payload domain must be `DomainTag::RevokeAttestation`.
+    pub fn execute_delegated_revoke_attestation(
+        e: Env,
+        attester: Address,
+        subject: Address,
+        payload: DelegatedActionPayload,
+    ) {
+        pausable::require_not_paused(&e);
+        attester.require_auth();
+
+        domain::verify_payload(
+            &e,
+            &payload,
+            DomainTag::RevokeAttestation,
+            &attester,
+            &subject,
+        );
+        nonce::consume_nonce(&e, &attester, payload.nonce);
+
+        Self::mark_delegation_revoked(
+            &e,
+            attester,
+            subject,
+            DelegationType::Attestation,
+            "attestation",
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Query entry points
+    // -----------------------------------------------------------------------
 
     /// Retrieve a stored delegation.
     pub fn get_delegation(
@@ -198,6 +282,16 @@ impl CredenceDelegation {
         }
     }
 
+    /// Return the current nonce for `identity`.  Relayers query this before
+    /// building the off-chain payload.
+    pub fn get_nonce(e: Env, identity: Address) -> u64 {
+        nonce::get_nonce(&e, &identity)
+    }
+
+    // -----------------------------------------------------------------------
+    // Pausable pass-throughs
+    // -----------------------------------------------------------------------
+
     pub fn pause(e: Env, caller: Address) -> Option<u64> {
         pausable::pause(&e, &caller)
     }
@@ -225,6 +319,55 @@ impl CredenceDelegation {
     pub fn execute_pause_proposal(e: Env, proposal_id: u64) {
         pausable::execute_pause_proposal(&e, proposal_id)
     }
+
+    // -----------------------------------------------------------------------
+    // Private helpers
+    // -----------------------------------------------------------------------
+
+    fn store_delegation(
+        e: &Env,
+        owner: Address,
+        delegate: Address,
+        delegation_type: DelegationType,
+        expires_at: u64,
+    ) -> Delegation {
+        let key = DataKey::Delegation(owner.clone(), delegate.clone(), delegation_type.clone());
+        let d = Delegation {
+            owner: owner.clone(),
+            delegate: delegate.clone(),
+            delegation_type,
+            expires_at,
+            revoked: false,
+        };
+        e.storage().instance().set(&key, &d);
+        e.events()
+            .publish((Symbol::new(e, "delegation_created"),), d.clone());
+        d
+    }
+
+    fn mark_delegation_revoked(
+        e: &Env,
+        owner: Address,
+        delegate: Address,
+        delegation_type: DelegationType,
+        kind: &'static str,
+    ) {
+        let key = DataKey::Delegation(owner.clone(), delegate.clone(), delegation_type.clone());
+        let mut d: Delegation = e
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| panic!("{} not found", kind));
+
+        if d.revoked {
+            panic!("{} already revoked", kind);
+        }
+
+        d.revoked = true;
+        e.storage().instance().set(&key, &d);
+        e.events()
+            .publish((Symbol::new(e, "delegation_revoked"),), d);
+    }
 }
 
 #[cfg(test)]
@@ -232,3 +375,6 @@ mod test;
 
 #[cfg(test)]
 mod test_pausable;
+
+#[cfg(test)]
+mod test_domain_separation;
