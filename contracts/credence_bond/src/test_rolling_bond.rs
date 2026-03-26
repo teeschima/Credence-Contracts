@@ -15,8 +15,7 @@ fn test_rolling_bond_creation() {
     let e = Env::default();
     e.ledger().with_mut(|li| li.timestamp = 1000);
     let (client, _admin, identity) = setup(&e);
-    let bond =
-        client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &true, &10_u64);
+    let bond = client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &true, &10_u64);
     assert!(bond.is_rolling);
     assert_eq!(bond.notice_period_duration, 10);
     assert_eq!(bond.withdrawal_requested_at, 0);

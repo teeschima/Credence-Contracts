@@ -6,9 +6,9 @@
 
 #![cfg(test)]
 
-use crate::test_helpers;
 use super::validation::{validate_bond_amount, MAX_BOND_AMOUNT, MIN_BOND_AMOUNT};
 use super::{CredenceBond, CredenceBondClient};
+use crate::test_helpers;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
 
@@ -20,13 +20,7 @@ fn setup(e: &Env) -> (CredenceBondClient<'_>, Address) {
     (client, admin)
 }
 
-fn setup_with_token(
-    e: &Env,
-) -> (
-    CredenceBondClient<'_>,
-    Address,
-    Address,
-) {
+fn setup_with_token(e: &Env) -> (CredenceBondClient<'_>, Address, Address) {
     let (client, admin, identity, ..) = test_helpers::setup_with_token(e);
     (client, admin, identity)
 }

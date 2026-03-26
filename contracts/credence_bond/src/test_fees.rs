@@ -19,8 +19,7 @@ fn test_fee_zero_when_not_configured() {
     let (treasury, fee_bps) = client.get_fee_config();
     assert!(treasury.is_none());
     assert_eq!(fee_bps, 0);
-    let bond =
-        client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
+    let bond = client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
     assert_eq!(bond.bonded_amount, 1000);
 }
 
@@ -41,8 +40,7 @@ fn test_fee_calculated_on_create_bond() {
     let (client, admin, identity) = setup(&e);
     let treasury = Address::generate(&e);
     client.set_fee_config(&admin, &treasury, &100_u32); // 1%
-    let bond =
-        client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
+    let bond = client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
     assert_eq!(bond.bonded_amount, 990); // 1% fee = 10
 }
 
@@ -52,8 +50,7 @@ fn test_fee_one_percent() {
     let (client, admin, identity) = setup(&e);
     let treasury = Address::generate(&e);
     client.set_fee_config(&admin, &treasury, &100_u32);
-    let bond =
-        client.create_bond_with_rolling(&identity, &10000_i128, &86400_u64, &false, &0_u64);
+    let bond = client.create_bond_with_rolling(&identity, &10000_i128, &86400_u64, &false, &0_u64);
     assert_eq!(bond.bonded_amount, 9_900);
 }
 
@@ -63,8 +60,7 @@ fn test_fee_zero_bps() {
     let (client, admin, identity) = setup(&e);
     let treasury = Address::generate(&e);
     client.set_fee_config(&admin, &treasury, &0_u32);
-    let bond =
-        client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
+    let bond = client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
     assert_eq!(bond.bonded_amount, 1000);
 }
 
@@ -74,8 +70,7 @@ fn test_fee_max_bps_capped() {
     let (client, admin, identity) = setup(&e);
     let treasury = Address::generate(&e);
     client.set_fee_config(&admin, &treasury, &10_000_u32);
-    let bond =
-        client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
+    let bond = client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
     assert_eq!(bond.bonded_amount, 0);
 }
 
