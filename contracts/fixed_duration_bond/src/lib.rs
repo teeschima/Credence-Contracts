@@ -17,7 +17,7 @@
 mod errors;
 mod types;
 
-use credence_math::{add_i128, split_bps};
+use credence_math::{add_i128, mul_i128, split_bps};
 use errors::*;
 use types::{DataKey, FeeConfig, FixedBond, OracleSafety};
 
@@ -31,6 +31,9 @@ mod tests;
 
 /// Maximum fee in basis points (1000 = 10%).
 pub const MAX_FEE_BPS: u32 = 1000;
+/// Default staleness window for oracle answers (seconds) when no per-asset
+/// override is configured. Default to 1 hour.
+pub const DEFAULT_MAX_STALENESS: u64 = 3600;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -78,6 +81,35 @@ fn validate_oracle_answer(answer: i128, safety: &OracleSafety) {
     }
     if answer < safety.min_answer || answer > safety.max_answer {
         panic!("{}", ERR_ORACLE_ANSWER_OUT_OF_RANGE);
+    }
+}
+
+/// Minimal oracle freshness/round validator as required by issue #125.
+/// Keeps checks deliberately small and deterministic per instructions.
+fn get_max_staleness(e: &Env, asset: &Address) -> u64 {
+    e.storage()
+        .instance()
+        .get::<_, u64>(&DataKey::OracleStaleness(asset.clone()))
+        .unwrap_or(DEFAULT_MAX_STALENESS)
+}
+
+#[inline]
+fn validate_oracle(
+    answer: i128,
+    updated_at: u64,
+    round_id: u64,
+    answered_in_round: u64,
+    max_staleness: u64,
+    now: u64,
+) {
+    if answer <= 0 {
+        panic!("{}", ERR_ORACLE_INVALID_ANSWER);
+    }
+    if answered_in_round < round_id {
+        panic!("{}", ERR_ORACLE_INCOMPLETE_ROUND);
+    }
+    if now.checked_sub(updated_at).unwrap_or(u64::MAX) > max_staleness {
+        panic!("{}", ERR_ORACLE_STALE);
     }
 }
 
@@ -193,17 +225,36 @@ impl FixedDurationBond {
     /// - oracle safety is configured for this asset
     /// - answer is strictly positive
     /// - answer is within the configured min/max bounds
-    pub fn quote_value(e: Env, asset: Address, amount: i128, oracle_answer: i128) -> i128 {
+    pub fn quote_value(
+        e: Env,
+        asset: Address,
+        amount: i128,
+        oracle_answer: i128,
+        updated_at: u64,
+        round_id: u64,
+        answered_in_round: u64,
+    ) -> i128 {
         if amount <= 0 {
             panic!("{}", ERR_INVALID_AMOUNT);
         }
         let safety: OracleSafety = e
             .storage()
             .instance()
-            .get(&DataKey::OracleSafety(asset))
+            .get(&DataKey::OracleSafety(asset.clone()))
             .unwrap_or_else(|| panic!("{}", ERR_ORACLE_SAFETY_NOT_SET));
         validate_oracle_answer(oracle_answer, &safety);
-        checked_mul_i128(amount, oracle_answer, ERR_VALUATION_OVERFLOW)
+        // Validate freshness and round completeness using per-asset staleness
+        let now = e.ledger().timestamp();
+        let max_staleness = get_max_staleness(&e, &asset);
+        validate_oracle(
+            oracle_answer,
+            updated_at,
+            round_id,
+            answered_in_round,
+            max_staleness,
+            now,
+        );
+        mul_i128(amount, oracle_answer, ERR_VALUATION_OVERFLOW)
     }
 
     // ── Bond lifecycle ─────────────────────────────────────────────────────
@@ -263,7 +314,7 @@ impl FixedDurationBond {
                     .instance()
                     .get(&DataKey::AccruedFees)
                     .unwrap_or(0);
-                let new_fees = checked_add_i128(prev_fees, fee, ERR_FEE_ACCRUE_OVERFLOW);
+                let new_fees = add_i128(prev_fees, fee, ERR_FEE_ACCRUE_OVERFLOW);
                 e.storage().instance().set(&DataKey::AccruedFees, &new_fees);
                 net
             } else {
