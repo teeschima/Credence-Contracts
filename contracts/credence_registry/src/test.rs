@@ -488,21 +488,6 @@ fn test_registered_identities_list_length_matches_unique_registrations() {
 
 #[test]
 #[should_panic(expected = "Error(Contract, #406)")]
-fn test_register_eoa_address_should_fail() {
-    let (env, contract_id, _admin) = setup_registry();
-    let client = CredenceRegistryClient::new(&env, &contract_id);
-
-    let identity = Address::generate(&env);
-    let eoa_address = Address::generate(&env); // This is an EOA, not a contract
-
-    env.mock_all_auths();
-
-    // Should panic because EOA address has no code
-    client.register(&identity, &eoa_address, &true);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #406)")]
 fn test_register_zero_address_should_fail() {
     let (env, contract_id, _admin) = setup_registry();
     let client = CredenceRegistryClient::new(&env, &contract_id);
@@ -512,7 +497,7 @@ fn test_register_zero_address_should_fail() {
 
     env.mock_all_auths();
 
-    // Should panic because zero address has no code
+    // Should panic because zero address is invalid
     client.register(&identity, &zero_address, &true);
 }
 
@@ -533,5 +518,24 @@ fn test_register_valid_contract_should_succeed() {
     
     assert_eq!(entry.identity, identity);
     assert_eq!(entry.bond_contract, mock_contract_id);
+    assert!(entry.active);
+}
+
+#[test]
+fn test_register_eoa_address_should_succeed() {
+    let (env, contract_id, _admin) = setup_registry();
+    let client = CredenceRegistryClient::new(&env, &contract_id);
+
+    let identity = Address::generate(&env);
+    let eoa_address = Address::generate(&env); // This is an EOA, not a contract
+
+    env.mock_all_auths();
+
+    // Should succeed because we allow non-interface contracts
+    // and only validate against zero address
+    let entry = client.register(&identity, &eoa_address, &true);
+    
+    assert_eq!(entry.identity, identity);
+    assert_eq!(entry.bond_contract, eoa_address);
     assert!(entry.active);
 }

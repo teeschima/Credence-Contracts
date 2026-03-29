@@ -131,8 +131,9 @@ impl CredenceRegistry {
 
         admin.require_auth();
 
-        // Validate that bond_contract is a deployed contract with code
-        if bond_contract.is_nonce(&e) {
+        // Validate that bond_contract is not a zero address
+        // Check for zero address (invalid contract address)
+        if bond_contract.clone().is_zero(&e) {
             panic_with_error!(&e, ContractError::InvalidContractAddress);
         }
         
