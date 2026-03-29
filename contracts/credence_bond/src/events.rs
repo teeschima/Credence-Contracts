@@ -66,3 +66,54 @@ pub fn emit_bond_slashed(e: &Env, identity: &Address, slash_amount: i128, total_
     let data = (slash_amount, total_slashed);
     e.events().publish(topics, data);
 }
+/// Emitted when a new claim is added for a user.
+///
+/// # Topics
+/// * `Symbol` - "claim_added"
+/// * `Address` - The user who can claim
+///
+/// # Data
+/// * `crate::claims::ClaimType` - The type of claim
+/// * `i128` - The amount to be claimed
+/// * `u64` - The source ID that generated this claim
+pub fn emit_claim_added(e: &Env, user: &Address, claim: &crate::claims::PendingClaim) {
+    let topics = (Symbol::new(e, "claim_added"), user.clone());
+    let data = (claim.claim_type, claim.amount, claim.source_id);
+    e.events().publish(topics, data);
+}
+
+/// Emitted when claims are processed by a user.
+///
+/// # Topics
+/// * `Symbol` - "claims_processed"
+/// * `Address` - The user who claimed
+///
+/// # Data
+/// * `u32` - Number of claims processed
+/// * `i128` - Total amount claimed
+/// * `soroban_sdk::Vec<crate::claims::ClaimType>` - Types of claims processed
+pub fn emit_claims_processed(
+    e: &Env,
+    user: &Address,
+    result: &crate::claims::ClaimResult,
+    _processed_claims: &soroban_sdk::Vec<crate::claims::PendingClaim>,
+) {
+    let topics = (Symbol::new(e, "claims_processed"), user.clone());
+    let data = (result.processed_count, result.total_amount, result.claim_types.clone());
+    e.events().publish(topics, data);
+}
+
+/// Emitted when expired claims are cleaned up.
+///
+/// # Topics
+/// * `Symbol` - "claims_expired"
+/// * `Address` - The user whose claims expired
+///
+/// # Data
+/// * `u32` - Number of expired claims removed
+/// * `i128` - Total amount of expired claims
+pub fn emit_claims_expired(e: &Env, user: &Address, expired_count: u32, expired_amount: i128) {
+    let topics = (Symbol::new(e, "claims_expired"), user.clone());
+    let data = (expired_count, expired_amount);
+    e.events().publish(topics, data);
+}

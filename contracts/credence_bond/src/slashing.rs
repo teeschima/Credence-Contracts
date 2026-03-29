@@ -70,8 +70,9 @@ pub fn validate_admin(e: &Env, caller: &Address) {
 /// 2. Calculates new slashed total
 /// 3. Caps at bonded amount (prevents over-slash)
 /// 4. Updates bond state
-/// 5. Emits slashing event
-/// 6. Returns updated bond state
+/// 5. Adds slashing reward claim for the slasher
+/// 6. Emits slashing event
+/// 7. Returns updated bond state
 ///
 /// # Arguments
 /// * `e` - Soroban environment
@@ -91,6 +92,7 @@ pub fn validate_admin(e: &Env, caller: &Address) {
 /// - Over-slash is prevented by capping at bonded_amount
 /// - Slashing is monotonic (always increases or stays same, never decreases)
 /// - Cannot slash bonds that don't exist (panic on "no bond")
+/// - Slasher receives 10% of slashed amount as reward (pull-payment)
 pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond {
     if amount < 0 {
         panic!("slash amount must be non-negative");
@@ -113,20 +115,53 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
         .expect("slashing caused overflow");
 
     // 4. Cap slashing at bonded amount (over-slash prevention)
+    let actual_slash_amount = if new_slashed > bond.bonded_amount {
+        bond.bonded_amount - bond.slashed_amount
+    } else {
+        amount
+    };
+    
     bond.slashed_amount = if new_slashed > bond.bonded_amount {
         bond.bonded_amount
     } else {
         new_slashed
     };
 
-    // 5. Persist updated bond state
+    // 5. Add slashing reward claim for the admin (10% of slashed amount)
+    if actual_slash_amount > 0 {
+        let reward_amount = actual_slash_amount / 10; // 10% reward
+        if reward_amount > 0 {
+            // Get next source ID for tracking
+            let source_id = get_next_slash_id(e);
+            
+            crate::claims::add_pending_claim(
+                e,
+                admin,
+                crate::claims::ClaimType::SlashingReward,
+                reward_amount,
+                source_id,
+                Some(soroban_sdk::Symbol::new(e, "slash_reward")),
+            );
+        }
+    }
+
+    // 6. Persist updated bond state
     e.storage().instance().set(&key, &bond);
 
-    // 6. Emit slashing event for off-chain tracking
-    emit_slashing_event(e, &bond.identity, amount, bond.slashed_amount);
+    // 7. Emit slashing event for off-chain tracking
+    emit_slashing_event(e, &bond.identity, actual_slash_amount, bond.slashed_amount);
 
-    // 7. Return updated bond state
+    // 8. Return updated bond state
     bond
+}
+
+/// Get next slash ID for tracking purposes
+fn get_next_slash_id(e: &Env) -> u64 {
+    let key = soroban_sdk::Symbol::new(e, "slash_counter");
+    let current: u64 = e.storage().instance().get(&key).unwrap_or(0);
+    let next = current + 1;
+    e.storage().instance().set(&key, &next);
+    next
 }
 
 /// NatSpec-style: Reverts slashing (reduces slashed amount). Admin only.

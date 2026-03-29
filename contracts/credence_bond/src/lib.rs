@@ -7,6 +7,7 @@ use soroban_sdk::{
 
 pub mod access_control;
 mod batch;
+pub mod claims;
 pub mod cooldown;
 mod early_exit_penalty;
 mod emergency;
@@ -102,6 +103,10 @@ pub enum DataKey {
     PauseApproval(u64, Address),
     PauseApprovalCount(u64),
     BondToken,
+    // Pull-payment claims
+    PendingClaims(Address),
+    ClaimableAmount(Address),
+    ClaimCounter,
 }
 
 #[contract]
@@ -492,6 +497,21 @@ impl CredenceBond {
         attestations.push_back(id);
         e.storage().instance().set(&subject_key, &attestations);
         verifier::record_attestation_issued(&e, &attester, weight);
+
+        // Add verifier reward claim (base reward + weight bonus)
+        let base_reward = 1000i128; // Base reward for attestation
+        let weight_bonus = (weight as i128) * 100; // Bonus based on weight
+        let total_reward = base_reward + weight_bonus;
+        
+        claims::add_pending_claim(
+            &e,
+            &attester,
+            claims::ClaimType::VerifierReward,
+            total_reward,
+            id,
+            Some(Symbol::new(&e, "attestation_reward")),
+        );
+
         e.events().publish(
             (Symbol::new(&e, "attestation_added"), subject),
             (id, attester, attestation_data),
@@ -655,11 +675,34 @@ impl CredenceBond {
             penalty_bps,
         );
         early_exit_penalty::emit_penalty_event(&e, &bond.identity, amount, penalty, &treasury);
+        
+        // Calculate net amount and transfer to user
         let net_amount = amount.checked_sub(penalty).expect("penalty exceeds amount");
         token_integration::transfer_from_contract(&e, &bond.identity, net_amount);
+        
+        // Instead of transferring penalty to treasury immediately, 
+        // add a potential penalty refund claim for good behavior
         if penalty > 0 {
+            // Transfer penalty to treasury (still push-based for treasury)
             token_integration::transfer_from_contract(&e, &treasury, penalty);
+            
+            // Add a potential penalty refund claim (50% of penalty can be refunded for good behavior)
+            let refund_amount = penalty / 2;
+            if refund_amount > 0 {
+                // Get next penalty ID for tracking
+                let penalty_id = get_next_penalty_id(&e);
+                
+                claims::add_pending_claim(
+                    &e,
+                    &bond.identity,
+                    claims::ClaimType::PenaltyRefund,
+                    refund_amount,
+                    penalty_id,
+                    Some(Symbol::new(&e, "early_exit_refund")),
+                );
+            }
         }
+        
         let old_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         bond.bonded_amount = bond.bonded_amount.checked_sub(amount).expect("underflow");
         if bond.slashed_amount > bond.bonded_amount {
@@ -669,6 +712,15 @@ impl CredenceBond {
         tiered_bond::emit_tier_change_if_needed(&e, &bond.identity, old_tier, new_tier);
         e.storage().instance().set(&key, &bond);
         bond
+    }
+
+    /// Get next penalty ID for tracking purposes
+    fn get_next_penalty_id(e: &Env) -> u64 {
+        let key = Symbol::new(e, "penalty_counter");
+        let current: u64 = e.storage().instance().get(&key).unwrap_or(0);
+        let next = current + 1;
+        e.storage().instance().set(&key, &next);
+        next
     }
 
     /// Request withdrawal (rolling bonds). Withdrawal allowed after notice period.
@@ -1236,6 +1288,51 @@ impl CredenceBond {
             .instance()
             .get(&DataKey::CooldownReq(requester))
             .unwrap_or_else(|| panic!("no cooldown request"))
+    }
+
+    // ========== PULL-PAYMENT CLAIMS ==========
+
+    /// Get all pending claims for a user
+    pub fn get_pending_claims(e: Env, user: Address) -> soroban_sdk::Vec<claims::PendingClaim> {
+        claims::get_pending_claims(&e, &user)
+    }
+
+    /// Get total claimable amount for a user
+    pub fn get_claimable_amount(e: Env, user: Address) -> i128 {
+        claims::get_claimable_amount(&e, &user)
+    }
+
+    /// Get claims summary by type for a user
+    pub fn get_claims_summary(e: Env, user: Address) -> soroban_sdk::Map<claims::ClaimType, i128> {
+        claims::get_claims_summary(&e, &user)
+    }
+
+    /// Process all pending claims for the caller
+    pub fn claim_all_rewards(e: Env, user: Address) -> claims::ClaimResult {
+        claims::process_claims(&e, &user, soroban_sdk::Vec::new(&e), 0)
+    }
+
+    /// Process specific types of claims for the caller
+    pub fn claim_rewards_by_type(
+        e: Env,
+        user: Address,
+        claim_types: soroban_sdk::Vec<claims::ClaimType>,
+    ) -> claims::ClaimResult {
+        claims::process_claims(&e, &user, claim_types, 0)
+    }
+
+    /// Process a limited number of claims for the caller
+    pub fn claim_rewards_batch(
+        e: Env,
+        user: Address,
+        max_claims: u32,
+    ) -> claims::ClaimResult {
+        claims::process_claims(&e, &user, soroban_sdk::Vec::new(&e), max_claims)
+    }
+
+    /// Clean up expired claims for any user (can be called by anyone)
+    pub fn cleanup_expired_claims(e: Env, user: Address) -> u32 {
+        claims::cleanup_expired_claims(&e, &user)
     }
 }
 

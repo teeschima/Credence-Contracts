@@ -374,6 +374,7 @@ dependencies = [
 name = "credence_treasury"
 version = "0.1.0"
 dependencies = [
+ "credence_errors",
  "soroban-sdk 22.0.10",
 ]
 
