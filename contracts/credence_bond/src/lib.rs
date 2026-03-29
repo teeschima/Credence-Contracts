@@ -21,6 +21,7 @@ mod nonce;
 mod parameters;
 pub mod pausable;
 mod rolling_bond;
+mod slashing;
 mod tiered_bond;
 mod token_integration;
 pub mod types;
@@ -32,7 +33,7 @@ use crate::access_control::{
     add_verifier_role, is_verifier, remove_verifier_role, require_verifier,
 };
 
-pub use batch::{BatchBondParams, BatchBondResult};
+pub use batch::{BatchBondParams, BatchBondResult, MAX_BATCH_BOND_SIZE};
 pub use evidence::{Evidence, EvidenceType};
 pub use types::Attestation;
 
@@ -745,14 +746,11 @@ impl CredenceBond {
         governance_approval::initialize_governance(&e, governors, quorum_bps, min_governors);
     }
 
-    /// Top up the bond with additional amount (checks for overflow)
-    pub fn top_up(e: Env, amount: i128) -> IdentityBond {
-        let key = DataKey::Bond;
-        let mut bond = e
-            .storage()
-            .instance()
-            .get::<_, IdentityBond>(&key)
-            .unwrap_or_else(|| panic!("no bond"));
+    pub fn propose_slash(e: Env, proposer: Address, amount: i128) -> u64 {
+        pausable::require_not_paused(&e);
+        proposer.require_auth();
+        governance_approval::propose_slash(&e, &proposer, amount)
+    }
 
     pub fn governance_vote(e: Env, voter: Address, proposal_id: u64, approve: bool) {
         pausable::require_not_paused(&e);
@@ -1036,7 +1034,7 @@ impl CredenceBond {
             active: false,
             is_rolling: bond.is_rolling,
             withdrawal_requested_at: bond.withdrawal_requested_at,
-            notice_period: bond.notice_period,
+            notice_period_duration: bond.notice_period_duration,
         };
         e.storage().instance().set(&bond_key, &updated);
         let cb_key = Symbol::new(&e, "callback");
@@ -1088,7 +1086,7 @@ impl CredenceBond {
             active: bond.active,
             is_rolling: bond.is_rolling,
             withdrawal_requested_at: bond.withdrawal_requested_at,
-            notice_period: bond.notice_period,
+            notice_period_duration: bond.notice_period_duration,
         };
         e.storage().instance().set(&bond_key, &updated);
         let cb_key = Symbol::new(&e, "callback");
