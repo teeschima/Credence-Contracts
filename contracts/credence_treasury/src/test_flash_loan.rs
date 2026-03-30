@@ -31,7 +31,7 @@ impl FlashLoanReceiver for ValidReceiver {
             .get(&Symbol::new(&e, "treasury"))
             .unwrap();
         if e.caller() != treasury {
-             panic!("unauthorized caller");
+            panic!("unauthorized caller");
         }
 
         let token_client = token::TokenClient::new(&e, &token);
@@ -69,7 +69,7 @@ impl FlashLoanReceiver for MaliciousMagicReceiver {
             .get(&Symbol::new(&e, "treasury"))
             .unwrap();
         if e.caller() != treasury {
-             panic!("unauthorized caller");
+            panic!("unauthorized caller");
         }
         let token_client = token::TokenClient::new(&e, &token);
         token_client.transfer(&e.current_contract_address(), &treasury, &(amount + fee));
@@ -106,7 +106,14 @@ impl FlashLoanReceiver for DefaulterReceiver {
 
 // --- Test Suite ---
 
-fn setup_test(e: &Env) -> (CredenceTreasuryClient<'_>, token::StellarAssetClient<'_>, Address, Address) {
+fn setup_test(
+    e: &Env,
+) -> (
+    CredenceTreasuryClient<'_>,
+    token::StellarAssetClient<'_>,
+    Address,
+    Address,
+) {
     let admin = Address::generate(e);
     let treasury_id = e.register(CredenceTreasury, ());
     let treasury = CredenceTreasuryClient::new(e, &treasury_id);
@@ -118,7 +125,7 @@ fn setup_test(e: &Env) -> (CredenceTreasuryClient<'_>, token::StellarAssetClient
     let token_admin_client = token::StellarAssetClient::new(e, &token_id);
 
     treasury.set_token(&token_id);
-    
+
     // Seed treasury with funds
     token_admin_client.mint(&treasury_id, &1_000_000_i128);
 
@@ -141,11 +148,21 @@ fn test_flash_loan_success() {
     let user = Address::generate(&e);
     let amount = 100_000_i128;
     // Expected fee = 100,000 * 50 / 10,000 = 500
-    
+
     // We need to give the receiver some tokens to pay the fee if they don't have enough
     let token_admin = token::StellarAssetClient::new(&e, &token_id);
     token_admin.mint(&receiver_id, &1_000_i128);
 
+    let balance_before = treasury.get_balance();
+
+    treasury.flash_loan(&user, &receiver_id, &amount, &Bytes::new(&e));
+
+    let balance_after = treasury.get_balance();
+    assert_eq!(balance_after, balance_before + 500_i128);
+
+    let source_balance = treasury.get_balance_by_source(FundSource::ProtocolFee);
+    assert_eq!(source_balance, 500_i128);
+}
 
 #[test]
 #[should_panic(expected = "HostError")] // ContractError::InvalidFlashLoanCallback
@@ -196,17 +213,28 @@ fn test_flash_loan_reentrancy_blocked() {
             _fee: i128,
             _data: Bytes,
         ) -> Symbol {
-            let treasury_id = e.storage().instance().get::<_, Address>(&Symbol::new(&e, "treasury")).unwrap();
+            let treasury_id = e
+                .storage()
+                .instance()
+                .get::<_, Address>(&Symbol::new(&e, "treasury"))
+                .unwrap();
             let treasury = CredenceTreasuryClient::new(&e, &treasury_id);
             // Re-enter
-            treasury.flash_loan(&initiator, &e.current_contract_address(), &amount, &Bytes::new(&e));
+            treasury.flash_loan(
+                &initiator,
+                &e.current_contract_address(),
+                &amount,
+                &Bytes::new(&e),
+            );
             Symbol::new(&e, FLASH_LOAN_SUCCESS)
         }
     }
-    
+
     let receiver_id = e.register(ReentrantReceiver, ());
     e.as_contract(&receiver_id, || {
-        e.storage().instance().set(&Symbol::new(&e, "treasury"), &treasury.address);
+        e.storage()
+            .instance()
+            .set(&Symbol::new(&e, "treasury"), &treasury.address);
     });
 
     let user = Address::generate(&e);

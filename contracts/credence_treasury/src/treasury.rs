@@ -108,7 +108,9 @@ impl CredenceTreasury {
         e.storage()
             .instance()
             .set(&DataKey::ProposalCounter, &0_u64);
-        e.storage().instance().set(&DataKey::FlashLoanFeeBps, &0_u32);
+        e.storage()
+            .instance()
+            .set(&DataKey::FlashLoanFeeBps, &0_u32);
         e.storage().instance().set(&DataKey::IsLocked, &false);
         e.events()
             .publish((Symbol::new(&e, "treasury_initialized"),), admin);
@@ -128,7 +130,9 @@ impl CredenceTreasury {
         if fee_bps > 10000 {
             panic_with_error!(&e, ContractError::InvalidPenaltyBps);
         }
-        e.storage().instance().set(&DataKey::FlashLoanFeeBps, &fee_bps);
+        e.storage()
+            .instance()
+            .set(&DataKey::FlashLoanFeeBps, &fee_bps);
     }
 
     /// Receive protocol fee or slashed funds. Caller must be admin or an authorized depositor.
@@ -528,7 +532,6 @@ impl CredenceTreasury {
         let required = balance_before
             .checked_add(fee)
             .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
-
 
         e.events().publish(
             (Symbol::new(&e, "flash_loan"), initiator),
