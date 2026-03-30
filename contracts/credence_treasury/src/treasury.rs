@@ -272,9 +272,11 @@ impl CredenceTreasury {
         if threshold > count {
             panic_with_error!(&e, ContractError::ThresholdExceedsSigners);
         }
+        let old_threshold: u32 = e.storage().instance().get(&DataKey::Threshold).unwrap_or(0);
         e.storage().instance().set(&DataKey::Threshold, &threshold);
+        // Emit old and new values for auditability
         e.events()
-            .publish((Symbol::new(&e, "threshold_updated"),), threshold);
+            .publish((Symbol::new(&e, "threshold_updated"),), (old_threshold, threshold));
     }
 
     /// Propose a withdrawal. Only a signer can propose. Creates a proposal that can be approved and executed.
