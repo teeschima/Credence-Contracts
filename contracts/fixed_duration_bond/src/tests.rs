@@ -1,7 +1,13 @@
 //! Comprehensive tests for the fixed_duration_bond contract.
 
 use crate::test_helpers::*;
-use crate::{apply_bps, FixedDurationBond, FixedDurationBondClient, MAX_FEE_BPS};
+use crate::{
+    apply_bps,
+    FixedDurationBond,
+    FixedDurationBondClient,
+    MAX_FEE_BPS,
+    DEFAULT_MAX_STALENESS,
+};
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{Address, Env};
@@ -432,7 +438,8 @@ fn test_quote_value_success_within_configured_bounds() {
     let (client, admin, _owner, token, _cid) = setup(&e);
 
     client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
-    let quoted = client.quote_value(&token, &10_i128, &123_456_i128);
+    let now = e.ledger().timestamp();
+    let quoted = client.quote_value(&token, &10_i128, &123_456_i128, &now, &1_u64, &1_u64);
     assert_eq!(quoted, 1_234_560_i128);
 }
 
@@ -445,8 +452,9 @@ fn test_quote_value_uses_per_asset_bounds() {
     client.set_oracle_safety(&admin, &token_a, &1_i128, &1_000_i128);
     client.set_oracle_safety(&admin, &token_b, &2_000_i128, &5_000_i128);
 
-    let a_value = client.quote_value(&token_a, &5_i128, &1_000_i128);
-    let b_value = client.quote_value(&token_b, &5_i128, &2_000_i128);
+    let now = e.ledger().timestamp();
+    let a_value = client.quote_value(&token_a, &5_i128, &1_000_i128, &now, &1_u64, &1_u64);
+    let b_value = client.quote_value(&token_b, &5_i128, &2_000_i128, &now, &1_u64, &1_u64);
     assert_eq!(a_value, 5_000_i128);
     assert_eq!(b_value, 10_000_i128);
 }
@@ -457,7 +465,8 @@ fn test_quote_value_rejects_zero_oracle_answer() {
     let e = Env::default();
     let (client, admin, _owner, token, _cid) = setup(&e);
     client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
-    client.quote_value(&token, &10_i128, &0_i128);
+    let now = e.ledger().timestamp();
+    client.quote_value(&token, &10_i128, &0_i128, &now, &1_u64, &1_u64);
 }
 
 #[test]
@@ -466,7 +475,8 @@ fn test_quote_value_rejects_negative_oracle_answer() {
     let e = Env::default();
     let (client, admin, _owner, token, _cid) = setup(&e);
     client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
-    client.quote_value(&token, &10_i128, &(-1_i128));
+    let now = e.ledger().timestamp();
+    client.quote_value(&token, &10_i128, &(-1_i128), &now, &1_u64, &1_u64);
 }
 
 #[test]
@@ -475,7 +485,8 @@ fn test_quote_value_rejects_extreme_oracle_answer() {
     let e = Env::default();
     let (client, admin, _owner, token, _cid) = setup(&e);
     client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
-    client.quote_value(&token, &10_i128, &9_999_999_999_i128);
+    let now = e.ledger().timestamp();
+    client.quote_value(&token, &10_i128, &9_999_999_999_i128, &now, &1_u64, &1_u64);
 }
 
 #[test]
@@ -483,7 +494,35 @@ fn test_quote_value_rejects_extreme_oracle_answer() {
 fn test_quote_value_rejects_missing_asset_config() {
     let e = Env::default();
     let (client, _admin, _owner, token, _cid) = setup(&e);
-    client.quote_value(&token, &10_i128, &100_i128);
+    let now = e.ledger().timestamp();
+    client.quote_value(&token, &10_i128, &100_i128, &now, &1_u64, &1_u64);
+}
+
+#[test]
+#[should_panic(expected = "oracle: stale answer")]
+fn test_quote_value_rejects_stale_answer() {
+    let e = Env::default();
+    let (client, admin, _owner, token, _cid) = setup(&e);
+
+    client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
+    // set updated_at to older than default staleness
+    // ensure ledger now is large enough to create a stale timestamp without underflow
+    e.ledger().with_mut(|li| li.timestamp = DEFAULT_MAX_STALENESS + 10);
+    let now = e.ledger().timestamp();
+    let stale = now - (DEFAULT_MAX_STALENESS + 1);
+    client.quote_value(&token, &10_i128, &1_000_i128, &stale, &1_u64, &1_u64);
+}
+
+#[test]
+#[should_panic(expected = "oracle: incomplete round")]
+fn test_quote_value_rejects_incomplete_round() {
+    let e = Env::default();
+    let (client, admin, _owner, token, _cid) = setup(&e);
+
+    client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
+    let now = e.ledger().timestamp();
+    // answered_in_round < round_id should panic
+    client.quote_value(&token, &10_i128, &1_000_i128, &now, &5_u64, &4_u64);
 }
 
 #[test]
