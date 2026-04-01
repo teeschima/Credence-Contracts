@@ -102,11 +102,23 @@ impl CredenceTreasury {
             .publish((Symbol::new(&e, "treasury_initialized"),), admin);
     }
 
-    /// Receive protocol fee or slashed funds. Caller must be admin or an authorized depositor.
-    /// @param e The contract environment
-    /// @param from Caller (must be auth'd)
-    /// @param amount Amount to credit
-    /// @param source Fund source (ProtocolFee or SlashedFunds)
+    /// Receive protocol fee or slashed funds report. Caller must be admin or an authorized depositor.
+    /// 
+    /// # Important Design Notes
+    /// This function records fee amounts reported by other contracts (e.g., credence_bond).
+    /// The treasury itself does NOT hold tokens — it is purely an accounting system.  
+    /// Actual token transfers occur at the bond contract level, where fee-on-transfer tokens
+    /// are rejected via balance-delta verification.
+    ///
+    /// # Arguments
+    /// * `from` - Caller (must be auth'd; typically admin or an authorized fee-collecting contract)
+    /// * `amount` - Amount to credit (must be > 0)
+    /// * `source` - Fund source classification (Protocol fee or slashed funds)
+    ///
+    /// # Panics
+    /// * `AmountMustBePositive` if amount <= 0
+    /// * `UnauthorizedDepositor` if caller is neither admin nor an authorized depositor
+    /// * `Overflow` if adding the amount would overflow the balance
     pub fn receive_fee(e: Env, from: Address, amount: i128, source: FundSource) {
         pausable::require_not_paused(&e);
         from.require_auth();
@@ -382,6 +394,10 @@ impl CredenceTreasury {
 
     /// Execute a withdrawal proposal. Callable by anyone once approval count >= threshold. Deducts from total and from both source buckets proportionally (by ratio of source/total at execution time) for accounting; for simplicity we deduct from total only and leave source balances as-is for reporting (so we track "received" by source; withdrawals are from the pool). Actually the issue says "track fund sources" — so we need to either (1) deduct from total only and keep source balances as "total ever received per source" (then total = sum of sources minus withdrawals would require a separate "withdrawn" counter), or (2) deduct from total and also deduct from each source proportionally. Simpler: total balance is the only withdrawable amount; balance_by_source is informational (total received per source). So on withdraw we only subtract from TotalBalance. Then balance_by_source no longer sums to total after withdrawals. Alternative: on withdraw we subtract from total and also reduce each source proportionally. That way get_balance_by_source still reflects "available from this source". Let me do proportional deduction so that source tracking stays consistent: when we withdraw, we deduct from TotalBalance and from each BalanceBySource in proportion to their share. So: total T, protocol P, slashed S. Withdraw W. New total = T - W. Ratio: P/T and S/T. Deduct from P: W * P / T, from S: W * S / T. So both get reduced proportionally.
     /// Execute a withdrawal proposal. Callable by anyone once approval count >= threshold.
+    /// 
+    /// This function marks a proposal as executed and updates the internal balance tracking.
+    /// The actual token transfer is caller's responsibility (use the proposal details to arrange
+    /// transfer externally or via callback contract).
     ///
     /// # Arguments
     /// * `proposal_id`   - ID of the approved withdrawal proposal.
