@@ -103,3 +103,25 @@ pub fn validate_and_consume(
     require_domain_match(e, expected_contract);
     consume_nonce(e, identity, nonce);
 }
+
+/// Variant of `validate_and_consume` that accepts an explicit grace window
+/// (in seconds) instead of reading it from storage.
+///
+/// The `grace` parameter overrides the stored grace window for the deadline
+/// check. All other checks (domain, nonce) behave identically.
+pub fn validate_and_consume_with_grace(
+    e: &Env,
+    identity: &Address,
+    expected_contract: &Address,
+    deadline: u64,
+    nonce: u64,
+    grace: u64,
+) {
+    let now = e.ledger().timestamp();
+    let effective_deadline = deadline.saturating_add(grace);
+    if now > effective_deadline {
+        panic!("signature expired: deadline passed");
+    }
+    require_domain_match(e, expected_contract);
+    consume_nonce(e, identity, nonce);
+}

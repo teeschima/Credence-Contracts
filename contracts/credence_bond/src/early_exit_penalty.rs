@@ -29,7 +29,7 @@ pub fn get_config(e: &Env) -> (Address, u32) {
 
 /// Set early exit config. Only admin should call (enforced by caller).
 pub fn set_config(e: &Env, treasury: Address, penalty_bps: u32) {
-    if penalty_bps > 10_000 {
+    if penalty_bps > math::BPS_DENOMINATOR as u32 {
         panic!("penalty_bps must be <= 10000 (100%)");
     }
     e.storage()
@@ -41,8 +41,8 @@ pub fn set_config(e: &Env, treasury: Address, penalty_bps: u32) {
 }
 
 /// Calculate early exit penalty based on remaining lock time.
-/// penalty = (amount * penalty_bps / 10000) * remaining_time / total_duration
-/// Uses integer math to avoid overflow: (amount * penalty_bps / 10000) * remaining_time / total_duration
+/// penalty = (amount * penalty_bps / BPS_DENOMINATOR) * remaining_time / total_duration
+/// Uses integer math to avoid overflow: (amount * penalty_bps / BPS_DENOMINATOR) * remaining_time / total_duration
 #[must_use]
 pub fn calculate_penalty(
     amount: i128,

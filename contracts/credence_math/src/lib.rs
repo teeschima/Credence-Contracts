@@ -38,7 +38,7 @@ pub fn div_i128(a: i128, b: i128, msg: &'static str) -> i128 {
     a.checked_div(b).unwrap_or_else(|| panic!("{msg}"))
 }
 
-/// Calculate a basis-point percentage of an `i128` amount: `amount * bps / 10_000`.
+/// Calculate a basis-point percentage of an `i128` amount: `amount * bps / BPS_DENOMINATOR`.
 #[inline]
 #[must_use]
 pub fn bps(amount: i128, bps: u32, mul_msg: &'static str, div_msg: &'static str) -> i128 {
@@ -46,7 +46,7 @@ pub fn bps(amount: i128, bps: u32, mul_msg: &'static str, div_msg: &'static str)
     div_i128(numerator, BPS_DENOMINATOR, div_msg)
 }
 
-/// Calculate a basis-point percentage of a `u64` amount: `amount * bps / 10_000`.
+/// Calculate a basis-point percentage of a `u64` amount: `amount * bps / BPS_DENOMINATOR`.
 #[inline]
 #[must_use]
 pub fn bps_u64(amount: u64, bps: u32, mul_msg: &'static str) -> u64 {
