@@ -5,7 +5,7 @@ pub mod pausable;
 #[cfg(test)]
 mod test_ownership_transfer;
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 
 /// Admin role hierarchy levels
 #[contracttype]
@@ -177,6 +177,12 @@ impl AdminContract {
     pub fn add_admin(e: Env, caller: Address, new_admin: Address, role: AdminRole) -> AdminInfo {
         pausable::require_not_paused(&e);
         caller.require_auth();
+
+        // Zero-address check
+        let zero_str = String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        if new_admin.to_string() == zero_str {
+            panic!("ZeroAddress");
+        }
 
         // Verify caller authorization
         Self::require_role_at_least(&e, &caller, Self::get_required_role_to_assign(role))
@@ -520,6 +526,13 @@ impl AdminContract {
         pausable::require_not_paused(&e);
         caller.require_auth();
 
+        // Zero-address check
+        let zero_str =
+            soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        if new_owner.to_string() == zero_str {
+            panic!("ZeroAddress");
+        }
+
         // Get current owner
         let current_owner: Address = e
             .storage()
@@ -766,12 +779,16 @@ impl AdminContract {
     /// # Returns
     /// A tuple of (min_admins, max_admins)
     pub fn get_config(e: Env) -> (u32, u32) {
-        let min_admins: u32 = e.storage().instance().get(&DataKey::MinAdmins).unwrap_or(1);
+        let min_admins: u32 = e
+            .storage()
+            .instance()
+            .get(&DataKey::MinAdmins)
+            .unwrap_or_else(|| panic!("contract not initialized - min_admins not set"));
         let max_admins: u32 = e
             .storage()
             .instance()
             .get(&DataKey::MaxAdmins)
-            .unwrap_or(100);
+            .unwrap_or_else(|| panic!("contract not initialized - max_admins not set"));
         (min_admins, max_admins)
     }
 
@@ -851,3 +868,9 @@ mod test_pausable;
 
 #[cfg(test)]
 mod test_basic;
+
+#[cfg(test)]
+mod test_zero_address_working;
+
+#[cfg(test)]
+mod test_immutable_config_simple;

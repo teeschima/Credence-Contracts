@@ -6,6 +6,9 @@
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
+/// Execution grace period in seconds after ETA.
+pub const EXECUTION_GRACE_PERIOD: u64 = 86_400;
+
 /// A pending parameter change. Created when admin proposes a new value for a
 /// protocol parameter. The change can only be executed after the ETA (estimated
 /// time of arrival) has passed.
@@ -20,6 +23,10 @@ pub struct ParameterChange {
     pub proposed_at: u64,
     /// Earliest timestamp at which the change can be executed.
     pub eta: u64,
+    /// Latest timestamp at which the change can be executed.
+    pub expires_at: u64,
+    /// Minimum delay enforced when the change was queued.
+    pub min_delay_at_queue: u64,
     /// True once the change has been executed.
     pub executed: bool,
     /// True if the change was cancelled by governance.
@@ -82,6 +89,40 @@ impl Timelock {
         parameter_key: Symbol,
         new_value: i128,
     ) -> u64 {
+        let min_delay: u64 = e
+            .storage()
+            .instance()
+            .get(&DataKey::MinDelay)
+            .unwrap_or_else(|| panic!("not initialized"));
+
+        if min_delay == 0 {
+            panic!("min_delay must be greater than zero");
+        }
+
+        let eta = e
+            .ledger()
+            .timestamp()
+            .checked_add(min_delay)
+            .expect("eta overflow");
+
+        Self::queue_change(e, proposer, parameter_key, new_value, eta)
+    }
+
+    /// Queue a parameter change with an explicit ETA. Only the admin can queue.
+    ///
+    /// @param e             The contract environment
+    /// @param proposer      Must be the admin
+    /// @param parameter_key Identifier for the parameter to change
+    /// @param new_value     The proposed new value
+    /// @param eta           Earliest timestamp for execution; must satisfy min delay
+    /// @return change_id    Unique ID for this pending change
+    pub fn queue_change(
+        e: Env,
+        proposer: Address,
+        parameter_key: Symbol,
+        new_value: i128,
+        eta: u64,
+    ) -> u64 {
         proposer.require_auth();
         let admin: Address = e
             .storage()
@@ -98,8 +139,19 @@ impl Timelock {
             .get(&DataKey::MinDelay)
             .unwrap_or_else(|| panic!("not initialized"));
 
+        if min_delay == 0 {
+            panic!("min_delay must be greater than zero");
+        }
+
         let now = e.ledger().timestamp();
-        let eta = now.checked_add(min_delay).expect("eta overflow");
+        let earliest_eta = now.checked_add(min_delay).expect("eta overflow");
+        if eta < earliest_eta {
+            panic!("eta must satisfy min delay");
+        }
+
+        let expires_at = eta
+            .checked_add(EXECUTION_GRACE_PERIOD)
+            .expect("execution window overflow");
 
         let id: u64 = e
             .storage()
@@ -116,6 +168,8 @@ impl Timelock {
             new_value,
             proposed_at: now,
             eta,
+            expires_at,
+            min_delay_at_queue: min_delay,
             executed: false,
             cancelled: false,
         };
@@ -160,6 +214,21 @@ impl Timelock {
         let now = e.ledger().timestamp();
         if now < change.eta {
             panic!("timelock delay has not elapsed");
+        }
+        if now > change.expires_at {
+            panic!("execution window expired");
+        }
+
+        if change.min_delay_at_queue == 0 {
+            panic!("min_delay must be greater than zero");
+        }
+
+        let earliest_eta = change
+            .proposed_at
+            .checked_add(change.min_delay_at_queue)
+            .expect("eta overflow");
+        if change.eta < earliest_eta {
+            panic!("eta must satisfy min delay");
         }
 
         change.executed = true;

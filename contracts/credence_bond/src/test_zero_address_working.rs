@@ -1,0 +1,76 @@
+use crate::*;
+use soroban_sdk::{Address, Env, String};
+
+#[cfg(test)]
+mod zero_address_tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    fn create_contract() -> CredenceBond {
+        CredenceBond {}
+    }
+
+    fn setup_contract(env: &Env) -> (Address, Address) {
+        let contract = create_contract();
+        let admin = Address::generate(env);
+        let contract_address = env.register_contract(None, contract);
+
+        env.mock_all_auths();
+
+        env.as_contract(&contract_address, || {
+            CredenceBond::initialize(env.clone(), admin.clone());
+        });
+
+        (contract_address, admin)
+    }
+
+    #[test]
+    fn test_valid_addresses_succeed() {
+        let env = Env::default();
+        let (contract_address, admin) = setup_contract(&env);
+        let treasury = Address::generate(&env);
+        let governance = Address::generate(&env);
+        let attester = Address::generate(&env);
+        let verifier = Address::generate(&env);
+        let token = Address::generate(&env);
+        let network = String::from_str(&env, "mainnet");
+
+        env.mock_all_auths();
+
+        env.as_contract(&contract_address, || {
+            // These should all succeed
+            CredenceBond::set_early_exit_config(
+                env.clone(),
+                admin.clone(),
+                treasury.clone(),
+                100, // 1% penalty
+            );
+
+            CredenceBond::set_emergency_config(
+                env.clone(),
+                admin.clone(),
+                governance.clone(),
+                treasury.clone(),
+                50, // 0.5% fee
+                true,
+            );
+
+            CredenceBond::register_attester(env.clone(), attester.clone());
+
+            CredenceBond::register_verifier(
+                env.clone(),
+                verifier.clone(),
+                1000, // stake deposit
+            );
+
+            CredenceBond::set_token(env.clone(), admin.clone(), token.clone());
+
+            CredenceBond::set_usdc_token(
+                env.clone(),
+                admin.clone(),
+                token.clone(),
+                network.clone(),
+            );
+        });
+    }
+}

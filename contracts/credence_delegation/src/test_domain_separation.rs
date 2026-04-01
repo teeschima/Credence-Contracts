@@ -10,7 +10,7 @@
 //! 5. Cross-method replay: a revoke payload cannot be reused as a delegate payload.
 
 use super::*;
-use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::testutils::Address as _;
 use soroban_sdk::Env;
 
 // ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ fn setup() -> (Env, CredenceDelegationClient<'static>, Address) {
 
 /// Build a valid `DelegatedActionPayload` for the given parameters.
 fn make_payload(
-    e: &Env,
+    _e: &Env,
     domain: DomainTag,
     owner: &Address,
     target: &Address,
@@ -343,6 +343,88 @@ fn wrong_target_in_payload_rejected() {
 // ---------------------------------------------------------------------------
 // Happy path: full delegated round-trip (delegate → revoke)
 // ---------------------------------------------------------------------------
+
+#[test]
+fn partial_nonce_invalidation_skips_range_and_allows_next_nonce() {
+    let (e, client, contract_id) = setup();
+    let owner = Address::generate(&e);
+    let delegate = Address::generate(&e);
+    let expiry = e.ledger().timestamp() + 86_400;
+
+    // Consume nonces 0 and 1 normally.
+    let p0 = make_payload(&e, DomainTag::Delegate, &owner, &delegate, &contract_id, 0);
+    client.execute_delegated_delegate(
+        &owner,
+        &delegate,
+        &DelegationType::Attestation,
+        &expiry,
+        &p0,
+    );
+    let p1 = make_payload(&e, DomainTag::Delegate, &owner, &delegate, &contract_id, 1);
+    client.execute_delegated_delegate(&owner, &delegate, &DelegationType::Management, &expiry, &p1);
+    assert_eq!(client.get_nonce(&owner), 2);
+
+    // Invalidate [2, 4): nonce 2 and 3 become unusable.
+    client.invalidate_nonce_range(&owner, &4);
+    assert_eq!(client.get_nonce(&owner), 4);
+
+    // Fresh nonce 4 must still be usable.
+    let p4 = make_payload(&e, DomainTag::Delegate, &owner, &delegate, &contract_id, 4);
+    client.execute_delegated_delegate(
+        &owner,
+        &delegate,
+        &DelegationType::Attestation,
+        &expiry,
+        &p4,
+    );
+    assert_eq!(client.get_nonce(&owner), 5);
+}
+
+#[test]
+#[should_panic(expected = "invalid nonce")]
+fn full_nonce_invalidation_rejects_previously_valid_payload() {
+    let (e, client, contract_id) = setup();
+    let owner = Address::generate(&e);
+    let delegate = Address::generate(&e);
+    let expiry = e.ledger().timestamp() + 86_400;
+
+    // This payload is valid at nonce 0 before invalidation.
+    let stale_payload = make_payload(&e, DomainTag::Delegate, &owner, &delegate, &contract_id, 0);
+
+    // Invalidate a full early range [0, 10).
+    client.invalidate_nonce_range(&owner, &10);
+    assert_eq!(client.get_nonce(&owner), 10);
+
+    // Previously valid payload must now fail.
+    client.execute_delegated_delegate(
+        &owner,
+        &delegate,
+        &DelegationType::Attestation,
+        &expiry,
+        &stale_payload,
+    );
+}
+
+#[test]
+#[should_panic(expected = "nonce invalidation exceeds max batch size")]
+fn nonce_invalidation_range_bound_enforced() {
+    let (e, client, _) = setup();
+    let owner = Address::generate(&e);
+
+    // MAX_NONCE_INVALIDATION_SPAN is 10_000, so 10_001 must fail from nonce 0.
+    client.invalidate_nonce_range(&owner, &10_001);
+}
+
+#[test]
+#[should_panic(expected = "new nonce must be greater than current nonce")]
+fn nonce_invalidation_must_be_monotonic() {
+    let (e, client, _) = setup();
+    let owner = Address::generate(&e);
+
+    client.invalidate_nonce_range(&owner, &1);
+    // Reusing the same target is non-monotonic and must fail.
+    client.invalidate_nonce_range(&owner, &1);
+}
 
 #[test]
 fn happy_path_delegated_delegate_then_revoke() {

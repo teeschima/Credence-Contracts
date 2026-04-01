@@ -120,7 +120,7 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
     } else {
         amount
     };
-    
+
     bond.slashed_amount = if new_slashed > bond.bonded_amount {
         bond.bonded_amount
     } else {
@@ -133,7 +133,7 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
         if reward_amount > 0 {
             // Get next source ID for tracking
             let source_id = get_next_slash_id(e);
-            
+
             crate::claims::add_pending_claim(
                 e,
                 admin,
@@ -150,6 +150,18 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
 
     // 7. Emit slashing event for off-chain tracking
     emit_slashing_event(e, &bond.identity, actual_slash_amount, bond.slashed_amount);
+    
+    // Emit v2 event with enhanced indexing for backward compatibility during migration
+    crate::events::emit_bond_slashed_v2(
+        e, 
+        &bond.identity, 
+        actual_slash_amount, 
+        bond.slashed_amount, 
+        e.ledger().timestamp(), 
+        admin, 
+        "Slashed by admin".to_string(), 
+        bond.slashed_amount >= bond.bonded_amount
+    );
 
     // 8. Return updated bond state
     bond

@@ -38,10 +38,10 @@ pub fn set_pause_signer(e: &Env, admin: &Address, signer: &Address, enabled: boo
     require_admin_auth(e, admin);
 
     let key = DataKey::PauseSigner(signer.clone());
-    let existing: bool = e.storage().instance().get(&key).unwrap_or(false);
+    let old_enabled: bool = e.storage().instance().get(&key).unwrap_or(false);
 
     if enabled {
-        if !existing {
+        if !old_enabled {
             e.storage().instance().set(&key, &true);
             let count: u32 = e
                 .storage()
@@ -52,7 +52,7 @@ pub fn set_pause_signer(e: &Env, admin: &Address, signer: &Address, enabled: boo
                 .instance()
                 .set(&DataKey::PauseSignerCount, &count.saturating_add(1));
         }
-    } else if existing {
+    } else if old_enabled {
         e.storage().instance().remove(&key);
         let count: u32 = e
             .storage()
@@ -80,9 +80,10 @@ pub fn set_pause_signer(e: &Env, admin: &Address, signer: &Address, enabled: boo
         }
     }
 
+    // Emit old and new values for auditability
     e.events().publish(
         (Symbol::new(e, "pause_signer_set"), signer.clone()),
-        enabled,
+        (old_enabled, enabled),
     );
 }
 
@@ -96,11 +97,18 @@ pub fn set_pause_threshold(e: &Env, admin: &Address, threshold: u32) {
     if threshold > count {
         panic!("threshold cannot exceed signer count");
     }
+    let old_threshold: u32 = e
+        .storage()
+        .instance()
+        .get(&DataKey::PauseThreshold)
+        .unwrap_or(0);
     e.storage()
         .instance()
         .set(&DataKey::PauseThreshold, &threshold);
+
+    // Emit old and new values for auditability
     e.events()
-        .publish((Symbol::new(e, "pause_threshold_set"),), threshold);
+        .publish((Symbol::new(e, "pause_threshold_set"),), (old_threshold, threshold));
 }
 
 fn require_pause_signer(e: &Env, signer: &Address) {

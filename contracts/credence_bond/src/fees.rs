@@ -8,8 +8,8 @@ use soroban_sdk::{Address, Env, Symbol};
 
 use crate::math;
 
-/// Max fee in basis points (100%).
-const MAX_FEE_BPS: u32 = 10_000;
+/// Max fee in basis points (100% = `BPS_DENOMINATOR`).
+const MAX_FEE_BPS: u32 = math::BPS_DENOMINATOR as u32;
 
 /// Get treasury and fee rate (basis points). Returns (treasury, fee_bps).
 /// If not set, fee is zero (no treasury = no fee).

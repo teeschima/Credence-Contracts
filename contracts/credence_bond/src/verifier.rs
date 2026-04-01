@@ -17,6 +17,7 @@ use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 use crate::weighted_attestation;
 use crate::DataKey;
+use crate::safe_token;
 
 const KEY_MIN_STAKE: &str = "ver_min_stake";
 const KEY_INFO_PREFIX: &str = "ver_info";
@@ -156,13 +157,7 @@ pub fn register_with_stake(e: &Env, verifier: &Address, stake_deposit: i128) -> 
 
     // Interactions: pull stake from verifier into this contract.
     if stake_deposit > 0 {
-        let token: Address = e
-            .storage()
-            .instance()
-            .get(&DataKey::BondToken)
-            .unwrap_or_else(|| panic!("token not set"));
-        let contract = e.current_contract_address();
-        TokenClient::new(e, &token).transfer_from(&contract, verifier, &contract, &stake_deposit);
+        safe_token::safe_transfer_from(e, verifier, stake_deposit);
     }
 
     emit_registration_event(e, verifier, stake_deposit, info.stake, min_stake, kind);
@@ -270,8 +265,8 @@ pub fn withdraw_stake(e: &Env, verifier: &Address, amount: i128) -> VerifierInfo
         .instance()
         .get(&DataKey::BondToken)
         .unwrap_or_else(|| panic!("token not set"));
-    let contract = e.current_contract_address();
-    TokenClient::new(e, &token).transfer(&contract, verifier, &amount);
+    
+    safe_token::safe_transfer(e, verifier, amount);
 
     e.events().publish(
         (Symbol::new(e, EVENT_STAKE_WITHDRAWN), verifier.clone()),

@@ -32,3 +32,34 @@ pub fn consume_nonce(e: &Env, identity: &Address, expected_nonce: u64) {
         .instance()
         .set(&DataKey::Nonce(identity.clone()), &next);
 }
+
+/// Advances nonce to `new_nonce`, invalidating the half-open range
+/// `[current_nonce, new_nonce)`.
+///
+/// This allows compromised-key recovery by skipping potentially leaked,
+/// pre-signed delegated payloads without submitting each nonce one-by-one.
+///
+/// # Panics
+/// Panics if `new_nonce <= current_nonce` or if the span exceeds `max_span`.
+pub fn invalidate_nonce_range(
+    e: &Env,
+    identity: &Address,
+    new_nonce: u64,
+    max_span: u64,
+) -> (u64, u64) {
+    let current = get_nonce(e, identity);
+    if new_nonce <= current {
+        panic!("new nonce must be greater than current nonce");
+    }
+    let span = new_nonce
+        .checked_sub(current)
+        .expect("nonce underflow during invalidation");
+    if span > max_span {
+        panic!("nonce invalidation exceeds max batch size");
+    }
+
+    e.storage()
+        .instance()
+        .set(&DataKey::Nonce(identity.clone()), &new_nonce);
+    (current, new_nonce)
+}
