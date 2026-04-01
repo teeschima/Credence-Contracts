@@ -85,7 +85,7 @@ impl DataKey {
     pub fn claim_counter() -> DataKey {
         DataKey::ClaimCounter
     }
-    
+
     /// Individual claim by ID: DataKey::ClaimById(claim_id) -> PendingClaim
     pub const fn claim_by_id(claim_id: u64) -> DataKey {
         DataKey::ClaimById(claim_id)
@@ -118,7 +118,7 @@ pub fn add_pending_claim(
 
     // Get next claim ID
     let claim_id = get_next_claim_id(e);
-    
+
     let now = e.ledger().timestamp();
     let expires_at = now + DEFAULT_CLAIM_EXPIRY;
 
@@ -169,7 +169,7 @@ pub fn add_pending_claim(
 
     // Emit event
     events::emit_claim_added(e, user, &claim);
-    
+
     claim_id
 }
 
@@ -181,9 +181,7 @@ fn get_next_claim_id(e: &Env) -> u64 {
         .get(&DataKey::ClaimCounter)
         .unwrap_or(0);
     let next = current.checked_add(1).expect("claim counter overflow");
-    e.storage()
-        .persistent()
-        .set(&DataKey::ClaimCounter, &next);
+    e.storage().persistent().set(&DataKey::ClaimCounter, &next);
     next
 }
 

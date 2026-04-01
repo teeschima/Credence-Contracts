@@ -507,15 +507,15 @@ fn test_register_valid_contract_should_succeed() {
     let client = CredenceRegistryClient::new(&env, &contract_id);
 
     let identity = Address::generate(&env);
-    
+
     // Create a mock contract that has code
     let mock_contract_id = env.register(CredenceRegistry, ());
-    
+
     env.mock_all_auths();
 
     // Should succeed because mock_contract_id is a deployed contract
     let entry = client.register(&identity, &mock_contract_id, &true);
-    
+
     assert_eq!(entry.identity, identity);
     assert_eq!(entry.bond_contract, mock_contract_id);
     assert!(entry.active);
@@ -534,7 +534,7 @@ fn test_register_eoa_address_should_succeed() {
     // Should succeed because we allow non-interface contracts
     // and only validate against zero address
     let entry = client.register(&identity, &eoa_address, &true);
-    
+
     assert_eq!(entry.identity, identity);
     assert_eq!(entry.bond_contract, eoa_address);
     assert!(entry.active);

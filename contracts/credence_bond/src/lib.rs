@@ -134,6 +134,9 @@ pub enum DataKey {
     UpgradeProposal(u64),
     NextProposalId,
     UpgradeHistory,
+    // Supply cap enforcement storage keys
+    SupplyCap,
+    TotalSupply,
 }
 
 #[contract]
@@ -200,6 +203,42 @@ impl CredenceBond {
         e.storage()
             .instance()
             .set(&Symbol::new(&e, "admin"), &admin);
+        e.storage().instance().set(&DataKey::TotalSupply, &0_i128);
+    }
+
+    /// Set the supply cap for the bond market. Only admin can call.
+    /// @param e The contract environment
+    /// @param admin Address that can set the supply cap
+    /// @param cap Maximum total bonded amount allowed (0 = no cap)
+    pub fn set_supply_cap(e: Env, admin: Address, cap: i128) {
+        admin.require_auth();
+        Self::require_admin_internal(&e, &admin);
+        
+        if cap < 0 {
+            panic!("supply cap must be non-negative");
+        }
+        
+        e.storage().instance().set(&DataKey::SupplyCap, &cap);
+        e.events().publish(
+            (Symbol::new(&e, "supply_cap_updated"),),
+            (admin, cap),
+        );
+    }
+
+    /// Get the current supply cap.
+    pub fn get_supply_cap(e: Env) -> i128 {
+        e.storage()
+            .instance()
+            .get(&DataKey::SupplyCap)
+            .unwrap_or(0_i128)
+    }
+
+    /// Get the current total supply (total bonded amount).
+    pub fn get_total_supply(e: Env) -> i128 {
+        e.storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0_i128)
     }
 
     pub fn set_early_exit_config(e: Env, admin: Address, treasury: Address, penalty_bps: u32) {
@@ -208,7 +247,7 @@ impl CredenceBond {
         Self::require_admin_internal(&e, &admin);
 
         // Zero-address check
-        if treasury.to_string().to_string() == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" {
+        if treasury.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
             panic!("ZeroAddress");
         }
 
@@ -227,10 +266,10 @@ impl CredenceBond {
         Self::require_admin_internal(&e, &admin);
 
         // Zero-address checks
-        if governance.to_string().to_string() == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" {
+        if governance.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
             panic!("ZeroAddress");
         }
-        if treasury.to_string().to_string() == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" {
+        if treasury.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
             panic!("ZeroAddress");
         }
 
@@ -330,7 +369,7 @@ impl CredenceBond {
         pausable::require_not_paused(&e);
 
         // Zero-address check
-        if attester.to_string().to_string() == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" {
+        if attester.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
             panic!("ZeroAddress");
         }
 
@@ -388,7 +427,7 @@ impl CredenceBond {
         stake_deposit: i128,
     ) -> verifier::VerifierInfo {
         // Zero-address check
-        if verifier_addr.to_string().to_string() == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" {
+        if verifier_addr.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
             panic!("ZeroAddress");
         }
 
@@ -476,12 +515,31 @@ impl CredenceBond {
         let bond_start = e.ledger().timestamp();
         let _end = bond_start.checked_add(duration).expect("bond end overflow");
         let (fee, net_amount) = fees::calculate_fee(&e, amount);
+        
+        // Enforce supply cap - check after calculating net_amount
+        let supply_cap = Self::get_supply_cap(e.clone());
+        if supply_cap > 0 {
+            let current_total_supply = Self::get_total_supply(e.clone());
+            let new_total_supply = current_total_supply.checked_add(net_amount)
+                .expect("total supply overflow");
+            if new_total_supply > supply_cap {
+                panic!("supply cap exceeded");
+            }
+        }
+        
         if fee > 0 {
             let (treasury_opt, _) = fees::get_config(&e);
             if let Some(treasury) = treasury_opt {
                 fees::record_fee(&e, &identity, amount, fee, &treasury);
             }
         }
+        
+        // Update total supply after successful bond creation
+        let current_total_supply = Self::get_total_supply(e.clone());
+        let new_total_supply = current_total_supply.checked_add(net_amount)
+            .expect("total supply overflow");
+        e.storage().instance().set(&DataKey::TotalSupply, &new_total_supply);
+        
         let bond = IdentityBond {
             identity: identity.clone(),
             bonded_amount: net_amount,
@@ -912,6 +970,13 @@ impl CredenceBond {
         }
         let new_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         tiered_bond::emit_tier_change_if_needed(&e, &bond.identity, old_tier, new_tier);
+        
+        // Update total supply after withdrawal
+        let current_total_supply = Self::get_total_supply(e.clone());
+        let new_total_supply = current_total_supply.checked_sub(amount)
+            .expect("total supply underflow");
+        e.storage().instance().set(&DataKey::TotalSupply, &new_total_supply);
+        
         e.storage().instance().set(&key, &bond);
         
         // Emit both old and new events for backward compatibility during migration
@@ -993,6 +1058,13 @@ impl CredenceBond {
         }
         let new_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         tiered_bond::emit_tier_change_if_needed(&e, &bond.identity, old_tier, new_tier);
+        
+        // Update total supply after early withdrawal
+        let current_total_supply = Self::get_total_supply(e.clone());
+        let new_total_supply = current_total_supply.checked_sub(amount)
+            .expect("total supply underflow");
+        e.storage().instance().set(&DataKey::TotalSupply, &new_total_supply);
+        
         e.storage().instance().set(&key, &bond);
         
         // Emit both old and new events for backward compatibility during migration

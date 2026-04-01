@@ -422,7 +422,9 @@ impl ErrorExt for ContractError {
             }
             ContractError::AlreadyDeactivated => "Record is already in the deactivated state",
             ContractError::AlreadyActive => "Record is already in the active state",
-            ContractError::InvalidContractAddress => "Provided contract address is not a deployed contract",
+            ContractError::InvalidContractAddress => {
+                "Provided contract address is not a deployed contract"
+            }
             ContractError::ExpiryInPast => "Delegation expiry must be in the future",
             ContractError::DelegationNotFound => "No delegation found for the given key",
             ContractError::AlreadyRevoked => "Delegation has already been revoked",

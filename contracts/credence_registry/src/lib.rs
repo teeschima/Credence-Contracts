@@ -137,7 +137,7 @@ impl CredenceRegistry {
         if bond_contract == zero_addr {
             panic_with_error!(&e, ContractError::InvalidContractAddress);
         }
-        
+
         // ERC165-equivalent interface check
         if !allow_non_interface {
             let supported: bool = e

@@ -9,8 +9,8 @@
 //! - Proxy compatibility safeguards
 //! - Upgrade history tracking
 
+use crate::{events, DataKey};
 use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
-use crate::{DataKey, events};
 
 /// Upgrade authorization roles
 #[contracttype]
@@ -164,9 +164,7 @@ pub fn initialize_upgrade_auth(e: &Env, admin: &Address) {
     }
 
     // Set upgrade admin
-    e.storage()
-        .instance()
-        .set(&DataKey::UpgradeAdmin, admin);
+    e.storage().instance().set(&DataKey::UpgradeAdmin, admin);
 
     // Grant upgrader role to admin
     let auth = UpgradeAuthorization {
@@ -190,9 +188,7 @@ pub fn initialize_upgrade_auth(e: &Env, admin: &Address) {
         .set(&DataKey::AuthorizedUpgraders, &upgraders);
 
     // Initialize proposal ID counter
-    e.storage()
-        .instance()
-        .set(&DataKey::NextProposalId, &1u64);
+    e.storage().instance().set(&DataKey::NextProposalId, &1u64);
 
     // Initialize upgrade history
     e.storage()
@@ -299,7 +295,7 @@ pub fn revoke_upgrade_auth(e: &Env, admin: &Address, address: &Address) {
             .instance()
             .get(&DataKey::AuthorizedUpgraders)
             .unwrap_or(Vec::new(e));
-        
+
         if upgraders.len() <= 1 {
             panic!("cannot revoke last upgrade admin");
         }
@@ -387,7 +383,7 @@ pub fn require_upgrade_admin(e: &Env, caller: &Address) {
         .instance()
         .get(&DataKey::UpgradeAdmin)
         .unwrap_or_else(|| panic!("upgrade authorization not initialized"));
-    
+
     if *caller != upgrade_admin {
         panic!("not upgrade admin");
     }
