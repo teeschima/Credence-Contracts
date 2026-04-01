@@ -152,7 +152,7 @@ fn test_top_up_with_valid_amount() {
 }
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
+#[should_panic(expected = "top-up amount below minimum required")]
 fn test_top_up_with_zero_amount() {
     let e = Env::default();
     let (client, _admin, identity) = setup_with_token(&e);
@@ -165,7 +165,7 @@ fn test_top_up_with_zero_amount() {
 }
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
+#[should_panic(expected = "top-up amount below minimum required")]
 fn test_top_up_with_negative_amount() {
     let e = Env::default();
     let (client, _admin, identity) = setup_with_token(&e);
@@ -237,7 +237,7 @@ fn test_create_bond_then_top_up_valid_scenario() {
 }
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
+#[should_panic(expected = "top-up amount below minimum required")]
 fn test_create_bond_with_min_amount_then_invalid_top_up() {
     let e = Env::default();
     let (client, _admin, identity) = setup_with_token(&e);

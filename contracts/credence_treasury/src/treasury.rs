@@ -186,11 +186,23 @@ impl CredenceTreasury {
             .publish((Symbol::new(&e, "treasury_initialized"),), admin);
     }
 
-    /// Receive protocol fee or slashed funds. Caller must be admin or an authorized depositor.
-    /// @param e The contract environment
-    /// @param from Caller (must be auth'd)
-    /// @param amount Amount to credit
-    /// @param source Fund source (ProtocolFee or SlashedFunds)
+    /// Receive protocol fee or slashed funds report. Caller must be admin or an authorized depositor.
+    /// 
+    /// # Important Design Notes
+    /// This function records fee amounts reported by other contracts (e.g., credence_bond).
+    /// The treasury itself does NOT hold tokens — it is purely an accounting system.  
+    /// Actual token transfers occur at the bond contract level, where fee-on-transfer tokens
+    /// are rejected via balance-delta verification.
+    ///
+    /// # Arguments
+    /// * `from` - Caller (must be auth'd; typically admin or an authorized fee-collecting contract)
+    /// * `amount` - Amount to credit (must be > 0)
+    /// * `source` - Fund source classification (Protocol fee or slashed funds)
+    ///
+    /// # Panics
+    /// * `AmountMustBePositive` if amount <= 0
+    /// * `UnauthorizedDepositor` if caller is neither admin nor an authorized depositor
+    /// * `Overflow` if adding the amount would overflow the balance
     pub fn receive_fee(e: Env, from: Address, amount: i128, source: FundSource) {
         pausable::require_not_paused(&e);
         from.require_auth();
@@ -484,6 +496,10 @@ impl CredenceTreasury {
     }
 
     /// Execute a withdrawal proposal. Callable by anyone once approval count >= threshold.
+    /// 
+    /// This function marks a proposal as executed and updates the internal balance tracking.
+    /// The actual token transfer is caller's responsibility (use the proposal details to arrange
+    /// transfer externally or via callback contract).
     ///
     /// # Arguments
     /// * `proposal_id`   - ID of the approved withdrawal proposal.
