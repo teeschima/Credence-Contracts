@@ -279,6 +279,14 @@ pub enum ContractError {
     /// Contracts: treasury
     InsufficientApprovals = 605,
 
+    /// Flashloan callback returned an invalid magic value.
+    /// Contracts: treasury
+    InvalidFlashLoanCallback = 606,
+
+    /// Flashloan principal plus fee was not fully repaid.
+    /// Contracts: treasury
+    FlashLoanRepaymentFailed = 607,
+
     // --- Arithmetic (700-799) ---
     /// Integer overflow detected during a checked arithmetic operation.
     /// Replaces: .expect("... overflow")
@@ -355,7 +363,9 @@ impl ErrorExt for ContractError {
             | ContractError::InsufficientTreasuryBalance
             | ContractError::ProposalNotFound
             | ContractError::ProposalAlreadyExecuted
-            | ContractError::InsufficientApprovals => ErrorCategory::Treasury,
+            | ContractError::InsufficientApprovals
+            | ContractError::InvalidFlashLoanCallback
+            | ContractError::FlashLoanRepaymentFailed => ErrorCategory::Treasury,
 
             ContractError::Overflow | ContractError::Underflow => ErrorCategory::Arithmetic,
         }
@@ -429,6 +439,12 @@ impl ErrorExt for ContractError {
             }
             ContractError::InsufficientApprovals => {
                 "Proposal does not have enough approvals to execute"
+            }
+            ContractError::InvalidFlashLoanCallback => {
+                "Flashloan callback returned an invalid magic value"
+            }
+            ContractError::FlashLoanRepaymentFailed => {
+                "Flashloan principal plus fee was not fully repaid"
             }
             ContractError::Overflow => "Integer overflow in checked arithmetic",
             ContractError::Underflow => "Integer underflow in checked arithmetic",
