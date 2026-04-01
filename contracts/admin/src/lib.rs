@@ -2,6 +2,9 @@
 
 pub mod pausable;
 
+#[cfg(test)]
+mod test_ownership_transfer;
+
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
 /// Admin role hierarchy levels
@@ -57,6 +60,10 @@ enum DataKey {
     PauseProposal(u64),
     PauseApproval(u64, Address),
     PauseApprovalCount(u64),
+    /// Current contract owner
+    Owner,
+    /// Pending owner for two-step ownership transfer
+    PendingOwner,
 }
 
 #[contract]
@@ -141,6 +148,9 @@ impl AdminContract {
             &DataKey::RoleAdmins(AdminRole::Operator),
             &Vec::<Address>::new(&e),
         );
+
+        // Set the initial owner as the super admin
+        e.storage().instance().set(&DataKey::Owner, &super_admin);
 
         e.events()
             .publish((Symbol::new(&e, "admin_initialized"),), super_admin);
@@ -488,6 +498,143 @@ impl AdminContract {
 
         e.events()
             .publish((Symbol::new(&e, "admin_reactivated"),), admin_info);
+    }
+
+    /// Propose a new owner for the contract (two-step ownership transfer).
+    ///
+    /// # Arguments
+    /// * `caller` - Address of the current owner proposing the transfer
+    /// * `new_owner` - Address of the proposed new owner
+    ///
+    /// # Panics
+    /// * If caller is not the current owner
+    /// * If new_owner is the same as current owner
+    /// * If new_owner is not a SuperAdmin
+    ///
+    /// # Events
+    /// Emits `ownership_transfer_initiated` with current owner and pending owner
+    ///
+    /// # Notes
+    /// The ownership remains with the current owner until the new owner calls `accept_ownership`.
+    pub fn transfer_ownership(e: Env, caller: Address, new_owner: Address) {
+        pausable::require_not_paused(&e);
+        caller.require_auth();
+
+        // Get current owner
+        let current_owner: Address = e
+            .storage()
+            .instance()
+            .get(&DataKey::Owner)
+            .unwrap_or_else(|| panic!("owner not found"));
+
+        // Verify caller is the current owner
+        if caller != current_owner {
+            panic!("only current owner can transfer ownership");
+        }
+
+        // Verify new owner is different from current owner
+        if new_owner == current_owner {
+            panic!("new owner must be different from current owner");
+        }
+
+        // Verify new owner is a SuperAdmin
+        let new_owner_info: AdminInfo = e
+            .storage()
+            .instance()
+            .get(&DataKey::AdminInfo(new_owner.clone()))
+            .unwrap_or_else(|| panic!("new owner must be an existing admin"));
+
+        if new_owner_info.role != AdminRole::SuperAdmin {
+            panic!("new owner must have SuperAdmin role");
+        }
+
+        if !new_owner_info.active {
+            panic!("new owner must be active");
+        }
+
+        // Store pending owner
+        e.storage()
+            .instance()
+            .set(&DataKey::PendingOwner, &new_owner.clone());
+
+        e.events().publish(
+            (Symbol::new(&e, "ownership_transfer_initiated"),),
+            (current_owner, new_owner),
+        );
+    }
+
+    /// Accept ownership transfer (two-step acceptance).
+    ///
+    /// # Arguments
+    /// * `caller` - Address of the pending owner accepting the transfer
+    ///
+    /// # Panics
+    /// * If there is no pending owner
+    /// * If caller is not the pending owner
+    ///
+    /// # Events
+    /// Emits `ownership_transfer_accepted` with previous owner and new owner
+    ///
+    /// # Notes
+    /// This function completes the two-step ownership transfer process.
+    /// The caller must be the address that was previously set as pending owner.
+    pub fn accept_ownership(e: Env, caller: Address) {
+        pausable::require_not_paused(&e);
+        caller.require_auth();
+
+        // Get pending owner
+        let pending_owner: Address = e
+            .storage()
+            .instance()
+            .get(&DataKey::PendingOwner)
+            .unwrap_or_else(|| panic!("no pending owner"));
+
+        // Verify caller is the pending owner
+        if caller != pending_owner {
+            panic!("only pending owner can accept ownership");
+        }
+
+        // Get current owner for event emission
+        let previous_owner: Address = e
+            .storage()
+            .instance()
+            .get(&DataKey::Owner)
+            .unwrap_or_else(|| panic!("owner not found"));
+
+        // Transfer ownership
+        e.storage()
+            .instance()
+            .set(&DataKey::Owner, &pending_owner.clone());
+
+        // Clear pending owner
+        e.storage().instance().remove(&DataKey::PendingOwner);
+
+        e.events().publish(
+            (Symbol::new(&e, "ownership_transfer_accepted"),),
+            (previous_owner, pending_owner),
+        );
+    }
+
+    /// Get the current owner of the contract.
+    ///
+    /// # Returns
+    /// The address of the current owner
+    ///
+    /// # Panics
+    /// * If owner has not been set (contract not initialized)
+    pub fn get_owner(e: Env) -> Address {
+        e.storage()
+            .instance()
+            .get(&DataKey::Owner)
+            .unwrap_or_else(|| panic!("owner not found"))
+    }
+
+    /// Get the pending owner (if any) for the current ownership transfer.
+    ///
+    /// # Returns
+    /// `Some(address)` if there is a pending owner, `None` otherwise
+    pub fn get_pending_owner(e: Env) -> Option<Address> {
+        e.storage().instance().get(&DataKey::PendingOwner)
     }
 
     /// Get information about a specific admin.
