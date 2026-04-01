@@ -36,6 +36,12 @@ pub fn require_not_paused(e: &Env) {
 pub fn set_pause_signer(e: &Env, admin: &Address, signer: &Address, enabled: bool) {
     require_admin_auth(e, admin);
 
+    // Zero-address check
+    let zero_str = soroban_sdk::String::from_str(e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    if signer.to_string() == zero_str {
+        panic!("ZeroAddress");
+    }
+
     let key = DataKey::PauseSigner(signer.clone());
     let existing: bool = e.storage().instance().get(&key).unwrap_or(false);
 

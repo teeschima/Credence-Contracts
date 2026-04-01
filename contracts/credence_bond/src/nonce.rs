@@ -104,17 +104,24 @@ pub fn validate_and_consume(
     consume_nonce(e, identity, nonce);
 }
 
-/// Backward-compatible wrapper for call sites that pass an explicit grace value.
+/// Variant of `validate_and_consume` that accepts an explicit grace window
+/// (in seconds) instead of reading it from storage.
 ///
-/// Grace is read from storage by `require_not_expired`, so the `_grace` argument
-/// is intentionally ignored.
+/// The `grace` parameter overrides the stored grace window for the deadline
+/// check. All other checks (domain, nonce) behave identically.
 pub fn validate_and_consume_with_grace(
     e: &Env,
     identity: &Address,
     expected_contract: &Address,
     deadline: u64,
     nonce: u64,
-    _grace: u64,
+    grace: u64,
 ) {
-    validate_and_consume(e, identity, expected_contract, deadline, nonce);
+    let now = e.ledger().timestamp();
+    let effective_deadline = deadline.saturating_add(grace);
+    if now > effective_deadline {
+        panic!("signature expired: deadline passed");
+    }
+    require_domain_match(e, expected_contract);
+    consume_nonce(e, identity, nonce);
 }

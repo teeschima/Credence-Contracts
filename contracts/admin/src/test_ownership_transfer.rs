@@ -32,6 +32,10 @@ mod ownership_transfer_tests {
         env.mock_all_auths();
         env.as_contract(&contract_address, || {
             AdminContract::initialize(env.clone(), super_admin_1.clone(), 1, 100);
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::add_admin(
                 env.clone(),
                 super_admin_1.clone(),
@@ -118,6 +122,10 @@ mod ownership_transfer_tests {
                 super_admin_1.clone(),
                 super_admin_2.clone(),
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::accept_ownership(env.clone(), super_admin_2.clone());
         });
 
@@ -138,6 +146,10 @@ mod ownership_transfer_tests {
                 super_admin_1.clone(),
                 super_admin_2.clone(),
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::accept_ownership(env.clone(), super_admin_2.clone());
         });
 
@@ -164,6 +176,10 @@ mod ownership_transfer_tests {
                 unauthorized_address.clone(),
                 AdminRole::SuperAdmin,
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::transfer_ownership(
                 env.clone(),
                 unauthorized_address.clone(),
@@ -185,23 +201,39 @@ mod ownership_transfer_tests {
         env.mock_all_auths();
         env.as_contract(&contract_address, || {
             AdminContract::initialize(env.clone(), super_admin_1.clone(), 1, 100);
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::add_admin(
                 env.clone(),
                 super_admin_1.clone(),
                 super_admin_2.clone(),
                 AdminRole::SuperAdmin,
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::add_admin(
                 env.clone(),
                 super_admin_1.clone(),
                 unauthorized_address.clone(),
                 AdminRole::SuperAdmin,
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::transfer_ownership(
                 env.clone(),
                 super_admin_1.clone(),
                 super_admin_2.clone(),
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             // Try to accept as unauthorized address instead of pending owner
             AdminContract::accept_ownership(env.clone(), unauthorized_address.clone());
         });
@@ -248,12 +280,20 @@ mod ownership_transfer_tests {
         env.mock_all_auths();
         env.as_contract(&contract_address, || {
             AdminContract::initialize(env.clone(), super_admin.clone(), 1, 100);
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::add_admin(
                 env.clone(),
                 super_admin.clone(),
                 regular_admin.clone(),
                 AdminRole::Admin,
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::transfer_ownership(
                 env.clone(),
                 super_admin.clone(),
@@ -268,14 +308,24 @@ mod ownership_transfer_tests {
         let env = Env::default();
         let (contract_address, super_admin_1, super_admin_2) = setup_multiple_super_admins(&env);
 
+        env.as_contract(&contract_address, || {
+            // Ownership transfer requires the target to be a SuperAdmin, but peer
+            // SuperAdmins cannot deactivate each other through the public API.
+            // Set the target inactive directly so this test exercises the
+            // transfer guard rather than the deactivation permission check.
+            let mut admin_info: AdminInfo = env
+                .storage()
+                .instance()
+                .get(&DataKey::AdminInfo(super_admin_2.clone()))
+                .unwrap();
+            admin_info.active = false;
+            env.storage()
+                .instance()
+                .set(&DataKey::AdminInfo(super_admin_2.clone()), &admin_info);
+        });
+
         env.mock_all_auths();
         env.as_contract(&contract_address, || {
-            // Deactivate super_admin_2
-            AdminContract::deactivate_admin(
-                env.clone(),
-                super_admin_1.clone(),
-                super_admin_2.clone(),
-            );
             // Try to transfer ownership to inactive admin
             AdminContract::transfer_ownership(
                 env.clone(),
@@ -310,39 +360,60 @@ mod ownership_transfer_tests {
         env.mock_all_auths();
         env.as_contract(&contract_address, || {
             AdminContract::initialize(env.clone(), super_admin_1.clone(), 1, 100);
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::add_admin(
                 env.clone(),
                 super_admin_1.clone(),
                 super_admin_2.clone(),
                 AdminRole::SuperAdmin,
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::add_admin(
                 env.clone(),
                 super_admin_1.clone(),
                 super_admin_3.clone(),
                 AdminRole::SuperAdmin,
             );
+        });
 
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             // Initiate first transfer to super_admin_2
             AdminContract::transfer_ownership(
                 env.clone(),
                 super_admin_1.clone(),
                 super_admin_2.clone(),
             );
+        });
 
-            let pending_owner = AdminContract::get_pending_owner(env.clone());
-            assert_eq!(pending_owner, Some(super_admin_2.clone()));
+        let pending_owner = env.as_contract(&contract_address, || {
+            AdminContract::get_pending_owner(env.clone())
+        });
+        assert_eq!(pending_owner, Some(super_admin_2.clone()));
 
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             // Overwrite with transfer to super_admin_3
             AdminContract::transfer_ownership(
                 env.clone(),
                 super_admin_1.clone(),
                 super_admin_3.clone(),
             );
+        });
 
-            let new_pending_owner = AdminContract::get_pending_owner(env.clone());
-            assert_eq!(new_pending_owner, Some(super_admin_3.clone()));
+        let new_pending_owner = env.as_contract(&contract_address, || {
+            AdminContract::get_pending_owner(env.clone())
+        });
+        assert_eq!(new_pending_owner, Some(super_admin_3.clone()));
 
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             // Accept the latest transfer
             AdminContract::accept_ownership(env.clone(), super_admin_3.clone());
         });
@@ -365,37 +436,58 @@ mod ownership_transfer_tests {
         env.mock_all_auths();
         env.as_contract(&contract_address, || {
             AdminContract::initialize(env.clone(), super_admin_1.clone(), 1, 100);
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::add_admin(
                 env.clone(),
                 super_admin_1.clone(),
                 super_admin_2.clone(),
                 AdminRole::SuperAdmin,
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::add_admin(
                 env.clone(),
                 super_admin_1.clone(),
                 super_admin_3.clone(),
                 AdminRole::SuperAdmin,
             );
+        });
 
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             // Transfer from super_admin_1 to super_admin_2
             AdminContract::transfer_ownership(
                 env.clone(),
                 super_admin_1.clone(),
                 super_admin_2.clone(),
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::accept_ownership(env.clone(), super_admin_2.clone());
+        });
 
-            // Verify super_admin_2 is now the owner
-            let owner = AdminContract::get_owner(env.clone());
-            assert_eq!(owner, super_admin_2);
+        let owner = env.as_contract(&contract_address, || AdminContract::get_owner(env.clone()));
+        assert_eq!(owner, super_admin_2);
 
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             // super_admin_2 transfers to super_admin_3
             AdminContract::transfer_ownership(
                 env.clone(),
                 super_admin_2.clone(),
                 super_admin_3.clone(),
             );
+        });
+
+        env.mock_all_auths();
+        env.as_contract(&contract_address, || {
             AdminContract::accept_ownership(env.clone(), super_admin_3.clone());
         });
 

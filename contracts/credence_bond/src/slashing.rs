@@ -150,6 +150,18 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
 
     // 7. Emit slashing event for off-chain tracking
     emit_slashing_event(e, &bond.identity, actual_slash_amount, bond.slashed_amount);
+    
+    // Emit v2 event with enhanced indexing for backward compatibility during migration
+    crate::events::emit_bond_slashed_v2(
+        e, 
+        &bond.identity, 
+        actual_slash_amount, 
+        bond.slashed_amount, 
+        e.ledger().timestamp(), 
+        admin, 
+        "Slashed by admin".to_string(), 
+        bond.slashed_amount >= bond.bonded_amount
+    );
 
     // 8. Return updated bond state
     bond

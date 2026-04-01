@@ -39,6 +39,8 @@ pub enum ClaimType {
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct PendingClaim {
+    /// Unique claim ID
+    pub claim_id: u64,
     /// Type of claim
     pub claim_type: ClaimType,
     /// Amount to be claimed
@@ -51,6 +53,8 @@ pub struct PendingClaim {
     pub source_id: u64,
     /// Additional metadata (optional)
     pub metadata: Symbol,
+    /// Whether this claim has been processed
+    pub processed: bool,
 }
 
 /// Result of a claim operation
@@ -81,6 +85,11 @@ impl DataKey {
     pub fn claim_counter() -> DataKey {
         DataKey::ClaimCounter
     }
+
+    /// Individual claim by ID: DataKey::ClaimById(claim_id) -> PendingClaim
+    pub const fn claim_by_id(claim_id: u64) -> DataKey {
+        DataKey::ClaimById(claim_id)
+    }
 }
 
 /// Add a new pending claim for a user
@@ -102,22 +111,32 @@ pub fn add_pending_claim(
     amount: i128,
     source_id: u64,
     metadata: Option<Symbol>,
-) {
+) -> u64 {
     if amount <= 0 {
         panic!("claim amount must be positive");
     }
+
+    // Get next claim ID
+    let claim_id = get_next_claim_id(e);
 
     let now = e.ledger().timestamp();
     let expires_at = now + DEFAULT_CLAIM_EXPIRY;
 
     let claim = PendingClaim {
+        claim_id,
         claim_type,
         amount,
         created_at: now,
         expires_at,
         source_id,
         metadata: metadata.unwrap_or(Symbol::new(e, "")),
+        processed: false,
     };
+
+    // Store claim by ID for direct access
+    e.storage()
+        .persistent()
+        .set(&DataKey::ClaimById(claim_id), &claim.clone());
 
     // Get existing claims or create new vector
     let mut claims: Vec<PendingClaim> = e
@@ -150,6 +169,20 @@ pub fn add_pending_claim(
 
     // Emit event
     events::emit_claim_added(e, user, &claim);
+
+    claim_id
+}
+
+/// Get the next claim ID
+fn get_next_claim_id(e: &Env) -> u64 {
+    let current: u64 = e
+        .storage()
+        .persistent()
+        .get(&DataKey::ClaimCounter)
+        .unwrap_or(0);
+    let next = current.checked_add(1).expect("claim counter overflow");
+    e.storage().persistent().set(&DataKey::ClaimCounter, &next);
+    next
 }
 
 /// Get all pending claims for a user
@@ -301,7 +334,7 @@ pub fn process_claims(
             .set(&DataKey::ClaimableAmount(user.clone()), &remaining_amount);
     }
 
-    // Transfer tokens to user
+    // Transfer tokens to user using safe token operations
     if total_amount > 0 {
         let token: Address = e
             .storage()

@@ -58,6 +58,139 @@ fn test_create_bond_negative_amount() {
     assert_eq!(bond.bonded_amount, -100);
 }
 
+// Tests for supply cap functionality
+#[test]
+fn test_set_supply_cap_success() {
+    let e = Env::default();
+    let contract_id = e.register(CredenceBond, ());
+    let client = CredenceBondClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    client.initialize(&admin);
+
+    let cap = 10000_i128;
+    client.set_supply_cap(&admin, &cap);
+    
+    assert_eq!(client.get_supply_cap(), cap);
+}
+
+#[test]
+#[should_panic(expected = "supply cap must be non-negative")]
+fn test_set_supply_cap_negative() {
+    let e = Env::default();
+    let contract_id = e.register(CredenceBond, ());
+    let client = CredenceBondClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    client.initialize(&admin);
+
+    client.set_supply_cap(&admin, &-1000_i128);
+}
+
+#[test]
+fn test_supply_cap_enforcement_below_cap() {
+    let e = Env::default();
+    let contract_id = e.register(CredenceBond, ());
+    let client = CredenceBondClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    client.initialize(&admin);
+
+    let identity = Address::generate(&e);
+    let cap = 10000_i128;
+    client.set_supply_cap(&admin, &cap);
+
+    // Create bond below cap - should succeed
+    let bond = client.create_bond(&identity, &5000_i128, &86400_u64);
+    assert_eq!(bond.bonded_amount, 5000_i128);
+    assert_eq!(client.get_total_supply(), 5000_i128);
+}
+
+#[test]
+#[should_panic(expected = "supply cap exceeded")]
+fn test_supply_cap_enforcement_above_cap() {
+    let e = Env::default();
+    let contract_id = e.register(CredenceBond, ());
+    let client = CredenceBondClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    client.initialize(&admin);
+
+    let identity = Address::generate(&e);
+    let cap = 10000_i128;
+    client.set_supply_cap(&admin, &cap);
+
+    // Create bond above cap - should fail
+    client.create_bond(&identity, &15000_i128, &86400_u64);
+}
+
+#[test]
+fn test_supply_cap_with_multiple_bonds() {
+    let e = Env::default();
+    let contract_id = e.register(CredenceBond, ());
+    let client = CredenceBondClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    client.initialize(&admin);
+
+    let identity = Address::generate(&e);
+    let cap = 10000_i128;
+    client.set_supply_cap(&admin, &cap);
+
+    // Create first bond - should succeed
+    let bond1 = client.create_bond(&identity, &6000_i128, &86400_u64);
+    assert_eq!(bond1.bonded_amount, 6000_i128);
+    assert_eq!(client.get_total_supply(), 6000_i128);
+
+    // Create second bond that would exceed cap - should fail
+    client.create_bond(&identity, &5000_i128, &86400_u64);
+}
+
+#[test]
+fn test_supply_cap_no_cap() {
+    let e = Env::default();
+    let contract_id = e.register(CredenceBond, ());
+    let client = CredenceBondClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    client.initialize(&admin);
+
+    let identity = Address::generate(&e);
+    // Don't set cap (defaults to 0 = no cap)
+
+    // Create bond without cap - should succeed
+    let bond = client.create_bond(&identity, &50000_i128, &86400_u64);
+    assert_eq!(bond.bonded_amount, 50000_i128);
+    assert_eq!(client.get_total_supply(), 50000_i128);
+}
+
+#[test]
+fn test_supply_cap_withdrawal_reduces_supply() {
+    let e = Env::default();
+    let contract_id = e.register(CredenceBond, ());
+    let client = CredenceBondClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    client.initialize(&admin);
+
+    let identity = Address::generate(&e);
+    let cap = 10000_i128;
+    client.set_supply_cap(&admin, &cap);
+
+    // Create bond
+    let bond = client.create_bond(&identity, &8000_i128, &86400_u64);
+    assert_eq!(client.get_total_supply(), 8000_i128);
+
+    // Withdraw some amount
+    client.withdraw_bond(&3000_i128);
+    assert_eq!(client.get_total_supply(), 5000_i128);
+
+    // Should be able to create new bond up to cap again
+    let bond2 = client.create_bond(&identity, &4000_i128, &86400_u64);
+    assert_eq!(bond2.bonded_amount, 4000_i128);
+    assert_eq!(client.get_total_supply(), 9000_i128);
+}
+
 /// Test bond creation with maximum valid amount
 #[test]
 fn test_create_bond_max_amount() {
