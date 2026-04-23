@@ -943,6 +943,7 @@ impl CredenceBond {
         pausable::require_not_paused(&e);
         // Ensure bond is active before allowing withdrawal
         Self::require_active_bond(&e);
+        Self::acquire_lock(&e);
 
         let key = DataKey::Bond;
         let mut bond = e
@@ -985,7 +986,6 @@ impl CredenceBond {
             Self::release_lock(&e);
             panic!("insufficient balance for withdrawal");
         }
-        token_integration::transfer_from_contract(&e, &bond.identity, amount);
         let old_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         bond.bonded_amount = bond.bonded_amount.checked_sub(amount).expect("underflow");
         if bond.slashed_amount > bond.bonded_amount {
@@ -1017,6 +1017,10 @@ impl CredenceBond {
             false,
             0,
         );
+        
+        // External call after all state updates (CEI pattern)
+        token_integration::transfer_from_contract(&e, &bond.identity, amount);
+        Self::release_lock(&e);
 
         bond
     }
@@ -1059,33 +1063,6 @@ impl CredenceBond {
         );
         early_exit_penalty::emit_penalty_event(&e, &bond.identity, amount, penalty, &treasury);
 
-        // Calculate net amount and transfer to user
-        let net_amount = amount.checked_sub(penalty).expect("penalty exceeds amount");
-        token_integration::transfer_from_contract(&e, &bond.identity, net_amount);
-
-        // Instead of transferring penalty to treasury immediately,
-        // add a potential penalty refund claim for good behavior
-        if penalty > 0 {
-            // Transfer penalty to treasury (still push-based for treasury)
-            token_integration::transfer_from_contract(&e, &treasury, penalty);
-
-            // Add a potential penalty refund claim (50% of penalty can be refunded for good behavior)
-            let refund_amount = penalty / 2;
-            if refund_amount > 0 {
-                // Get next penalty ID for tracking
-                let penalty_id = Self::get_next_penalty_id(&e);
-
-                claims::add_pending_claim(
-                    &e,
-                    &bond.identity,
-                    claims::ClaimType::PenaltyRefund,
-                    refund_amount,
-                    penalty_id,
-                    Some(Symbol::new(&e, "early_exit_refund")),
-                );
-            }
-        }
-
         let old_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         bond.bonded_amount = bond.bonded_amount.checked_sub(amount).expect("underflow");
         if bond.slashed_amount > bond.bonded_amount {
@@ -1119,6 +1096,32 @@ impl CredenceBond {
             penalty,
         );
 
+        // Calculate net amount and transfer to user (after state updates - CEI pattern)
+        let net_amount = amount.checked_sub(penalty).expect("penalty exceeds amount");
+        token_integration::transfer_from_contract(&e, &bond.identity, net_amount);
+
+        // Transfer penalty to treasury (after state updates - CEI pattern)
+        if penalty > 0 {
+            token_integration::transfer_from_contract(&e, &treasury, penalty);
+
+            // Add a potential penalty refund claim (50% of penalty can be refunded for good behavior)
+            let refund_amount = penalty / 2;
+            if refund_amount > 0 {
+                // Get next penalty ID for tracking
+                let penalty_id = Self::get_next_penalty_id(&e);
+
+                claims::add_pending_claim(
+                    &e,
+                    &bond.identity,
+                    claims::ClaimType::PenaltyRefund,
+                    refund_amount,
+                    penalty_id,
+                    Some(Symbol::new(&e, "early_exit_refund")),
+                );
+            }
+        }
+
+        Self::release_lock(&e);
         bond
     }
 
