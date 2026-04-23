@@ -1310,16 +1310,20 @@ impl CredenceBond {
                 .instance()
                 .get::<_, IdentityBond>(&key)
                 .unwrap_or_else(|| panic!("no bond"));
-
-            // Bond owner authorizes the top-up from their token balance.
-            bond.identity.require_auth();
-
+            let caller = bond.identity.clone();
+            caller.require_auth();
+            let token_addr: Address = e
+                .storage()
+                .instance()
+                .get(&DataKey::BondToken)
+                .unwrap_or_else(|| panic!("bond token not configured"));
             let old_amount = bond.bonded_amount;
             let new_amount = old_amount
                 .checked_add(amount)
                 .expect("bond increase caused overflow");
 
-            crate::safe_token::safe_transfer_from(&e, &bond.identity, amount);
+            // Use safe token operations
+            crate::safe_token::safe_transfer_from(&e, &caller, amount);
 
             let old_tier = tiered_bond::get_tier_for_amount(old_amount);
             let new_tier = tiered_bond::get_tier_for_amount(new_amount);

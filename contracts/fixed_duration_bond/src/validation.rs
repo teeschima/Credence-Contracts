@@ -43,6 +43,7 @@ pub fn validate_recipient(recipient: &Address, contract: &Address) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
     use soroban_sdk::{Address, Env};
 
     #[test]

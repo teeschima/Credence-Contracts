@@ -36,6 +36,11 @@ pub const MAX_FEE_BPS: u32 = 1000;
 /// Default staleness window for oracle answers (seconds) when no per-asset
 /// override is configured. Default to 1 hour.
 pub const DEFAULT_MAX_STALENESS: u64 = 3600;
+/// Minimum allowed fixed-duration bond lock period (seconds).
+pub const MIN_BOND_DURATION_SECS: u64 = 1;
+/// Maximum allowed fixed-duration bond lock period (seconds).
+/// Bound to one year to avoid unreasonably long locks.
+pub const MAX_BOND_DURATION_SECS: u64 = 365 * 86_400;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -342,6 +347,16 @@ impl FixedDurationBond {
             .get(&DataKey::OracleSafety(asset.clone()))
             .unwrap_or_else(|| panic!("{}", ERR_ORACLE_SAFETY_NOT_SET));
         validate_oracle_answer(oracle_answer, &safety);
+        let now = e.ledger().timestamp();
+        let max_staleness = get_max_staleness(&e, &asset);
+        validate_oracle(
+            oracle_answer,
+            updated_at,
+            round_id,
+            answered_in_round,
+            max_staleness,
+            now,
+        );
         mul_i128(amount, oracle_answer, ERR_VALUATION_OVERFLOW)
     }
 
@@ -351,7 +366,7 @@ impl FixedDurationBond {
     ///
     /// Requirements:
     /// - `amount` > 0
-    /// - `duration_secs` > 0
+    /// - `duration_secs` is within `[MIN_BOND_DURATION_SECS, MAX_BOND_DURATION_SECS]`
     /// - No currently active bond for `owner`
     /// - Caller has approved the contract to spend `amount`
     ///
@@ -365,6 +380,9 @@ impl FixedDurationBond {
         }
         if duration_secs == 0 {
             panic!("{}", ERR_INVALID_DURATION);
+        }
+        if !(MIN_BOND_DURATION_SECS..=MAX_BOND_DURATION_SECS).contains(&duration_secs) {
+            panic!("{}", ERR_DURATION_OUT_OF_BOUNDS);
         }
 
         // Reject if owner already has an active bond.
