@@ -213,6 +213,7 @@ impl CredenceBond {
     /// @param admin Address that can set the supply cap
     /// @param cap Maximum total bonded amount allowed (0 = no cap)
     pub fn set_supply_cap(e: Env, admin: Address, cap: i128) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
 
@@ -264,6 +265,7 @@ impl CredenceBond {
         emergency_fee_bps: u32,
         enabled: bool,
     ) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
 
@@ -283,6 +285,7 @@ impl CredenceBond {
     }
 
     pub fn set_emergency_mode(e: Env, admin: Address, governance: Address, enabled: bool) {
+        pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         let cfg = emergency::get_config(&e);
         if governance != cfg.governance {
@@ -301,6 +304,7 @@ impl CredenceBond {
         amount: i128,
         reason: Symbol,
     ) -> IdentityBond {
+        pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         let cfg = emergency::get_config(&e);
         if governance != cfg.governance {
@@ -421,6 +425,7 @@ impl CredenceBond {
     }
 
     pub fn set_verifier_stake_requirement(e: Env, admin: Address, min_stake: i128) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
         verifier::set_min_stake(&e, min_stake);
@@ -434,6 +439,7 @@ impl CredenceBond {
         verifier_addr: Address,
         stake_deposit: i128,
     ) -> verifier::VerifierInfo {
+        pausable::require_not_paused(&e);
         // Zero-address check
         if verifier_addr.to_string()
             == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
@@ -447,6 +453,7 @@ impl CredenceBond {
         })
     }
     pub fn deactivate_verifier(e: Env, verifier_addr: Address) -> verifier::VerifierInfo {
+        pausable::require_not_paused(&e);
         verifier_addr.require_auth();
         verifier::deactivate_verifier(&e, &verifier_addr, Symbol::new(&e, "self"))
     }
@@ -455,6 +462,7 @@ impl CredenceBond {
         admin: Address,
         verifier_addr: Address,
     ) -> verifier::VerifierInfo {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
         verifier::deactivate_verifier(&e, &verifier_addr, Symbol::new(&e, "admin"))
@@ -464,6 +472,7 @@ impl CredenceBond {
         verifier_addr: Address,
         amount: i128,
     ) -> verifier::VerifierInfo {
+        pausable::require_not_paused(&e);
         verifier_addr.require_auth();
         Self::with_reentrancy_guard(&e, || verifier::withdraw_stake(&e, &verifier_addr, amount))
     }
@@ -476,15 +485,18 @@ impl CredenceBond {
         verifier_addr: Address,
         new_reputation: i128,
     ) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
         verifier::set_reputation(&e, &verifier_addr, new_reputation, Symbol::new(&e, "admin"));
     }
 
     pub fn set_token(e: Env, admin: Address, token: Address) {
+        pausable::require_not_paused(&e);
         token_integration::set_token(&e, &admin, &token);
     }
     pub fn set_usdc_token(e: Env, admin: Address, token: Address, network: String) {
+        pausable::require_not_paused(&e);
         token_integration::set_usdc_token(&e, &admin, &token, &network);
     }
     pub fn get_usdc_token(e: Env) -> Address {
@@ -495,6 +507,7 @@ impl CredenceBond {
     }
 
     pub fn create_bond(e: Env, identity: Address, amount: i128, duration: u64) -> IdentityBond {
+        pausable::require_not_paused(&e);
         validation::validate_bond_amount(amount);
         validation::validate_bond_duration(duration);
         leverage::validate_leverage(amount, parameters::get_max_leverage(&e));
@@ -520,6 +533,7 @@ impl CredenceBond {
         // require token configuration (token may be unset in unit tests).
         validation::validate_bond_duration(duration);
 
+        pausable::require_not_paused(&e);
         identity.require_auth();
         token_integration::transfer_into_contract(&e, &identity, amount);
         let bond_start = e.ledger().timestamp();
@@ -647,6 +661,7 @@ impl CredenceBond {
         deadline: u64,
         nonce: u64,
     ) -> Attestation {
+        pausable::require_not_paused(&e);
         // Use nonce validation which reads the configured grace window internally
         nonce::validate_and_consume(&e, &attester, &contract_id, deadline, nonce);
         attester.require_auth();

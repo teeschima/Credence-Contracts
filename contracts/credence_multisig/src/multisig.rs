@@ -86,6 +86,14 @@ pub enum DataKey {
     SignatureCount(u64),
     /// List of all signer addresses (for enumeration).
     SignerList,
+    Paused,
+    PauseSigner(Address),
+    PauseSignerCount,
+    PauseThreshold,
+    PauseProposalCounter,
+    PauseProposal(u64),
+    PauseApproval(u64, Address),
+    PauseApprovalCount(u64),
 }
 
 #[contract]
@@ -120,6 +128,14 @@ impl CredenceMultiSig {
         }
 
         e.storage().instance().set(&DataKey::Admin, &admin);
+        e.storage().instance().set(&DataKey::Paused, &false);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &0_u32);
+        e.storage().instance().set(&DataKey::PauseThreshold, &0_u32);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseProposalCounter, &0_u64);
         e.storage()
             .instance()
             .set(&DataKey::SignerCount, &signer_count);
@@ -154,6 +170,7 @@ impl CredenceMultiSig {
     /// # Events
     /// Emits `signer_added` event
     pub fn add_signer(e: Env, admin: Address, signer: Address) {
+        crate::pausable::require_not_paused(&e);
         Self::require_admin(&e, &admin);
 
         let already = e
@@ -209,6 +226,7 @@ impl CredenceMultiSig {
     /// # Events
     /// Emits `signer_removed` event
     pub fn remove_signer(e: Env, admin: Address, signer: Address) {
+        crate::pausable::require_not_paused(&e);
         Self::require_admin(&e, &admin);
 
         let exists = e
@@ -278,6 +296,7 @@ impl CredenceMultiSig {
     /// # Events
     /// Emits `threshold_updated` event
     pub fn set_threshold(e: Env, admin: Address, threshold: u32) {
+        crate::pausable::require_not_paused(&e);
         Self::require_admin(&e, &admin);
 
         let count: u32 = e
@@ -326,6 +345,7 @@ impl CredenceMultiSig {
         expires_at: u64,
         metadata: Option<String>,
     ) -> u64 {
+        crate::pausable::require_not_paused(&e);
         proposer.require_auth();
 
         Self::require_signer(&e, &proposer);
@@ -389,6 +409,7 @@ impl CredenceMultiSig {
     /// # Events
     /// Emits `proposal_signed` event
     pub fn sign_proposal(e: Env, signer: Address, proposal_id: u64) {
+        crate::pausable::require_not_paused(&e);
         signer.require_auth();
 
         Self::require_signer(&e, &signer);
@@ -457,6 +478,7 @@ impl CredenceMultiSig {
     /// or perform the action after this succeeds. For security, actual
     /// execution logic should be implemented by the calling contract.
     pub fn execute_proposal(e: Env, proposal_id: u64) {
+        crate::pausable::require_not_paused(&e);
         let mut proposal: Proposal = e
             .storage()
             .instance()
@@ -508,6 +530,7 @@ impl CredenceMultiSig {
     /// # Events
     /// Emits `proposal_rejected` event
     pub fn reject_proposal(e: Env, admin: Address, proposal_id: u64) {
+        crate::pausable::require_not_paused(&e);
         Self::require_admin(&e, &admin);
 
         let mut proposal: Proposal = e
@@ -631,5 +654,33 @@ impl CredenceMultiSig {
 
         e.events()
             .publish((Symbol::new(&e, "proposal_expired"), proposal_id), ());
+    }
+
+    pub fn pause(e: Env, caller: Address) -> Option<u64> {
+        crate::pausable::pause(&e, &caller)
+    }
+
+    pub fn unpause(e: Env, caller: Address) -> Option<u64> {
+        crate::pausable::unpause(&e, &caller)
+    }
+
+    pub fn is_paused(e: Env) -> bool {
+        crate::pausable::is_paused(&e)
+    }
+
+    pub fn set_pause_signer(e: Env, admin: Address, signer: Address, enabled: bool) {
+        crate::pausable::set_pause_signer(&e, &admin, &signer, enabled)
+    }
+
+    pub fn set_pause_threshold(e: Env, admin: Address, threshold: u32) {
+        crate::pausable::set_pause_threshold(&e, &admin, threshold)
+    }
+
+    pub fn approve_pause_proposal(e: Env, signer: Address, proposal_id: u64) {
+        crate::pausable::approve_pause_proposal(&e, &signer, proposal_id)
+    }
+
+    pub fn execute_pause_proposal(e: Env, proposal_id: u64) {
+        crate::pausable::execute_pause_proposal(&e, proposal_id)
     }
 }

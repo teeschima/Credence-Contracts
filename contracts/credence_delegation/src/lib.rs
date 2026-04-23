@@ -292,6 +292,7 @@ impl CredenceDelegation {
     /// - Nonce remains strictly monotonic (`new_nonce` must be greater).
     /// - Range size is capped to keep gas predictable.
     pub fn invalidate_nonce_range(e: Env, identity: Address, new_nonce: u64) {
+        pausable::require_not_paused(&e);
         identity.require_auth();
         let (from_nonce, to_nonce) =
             nonce::invalidate_nonce_range(&e, &identity, new_nonce, MAX_NONCE_INVALIDATION_SPAN);
