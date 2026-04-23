@@ -165,6 +165,11 @@ pub enum ContractError {
     /// Contracts: bond
     LeverageExceeded = 212,
 
+    /// Token transfer resulted in different amount than requested (fee-on-transfer tokens).
+    /// Replaces: panic!("unsupported token: transfer amount mismatch")
+    /// Contracts: bond, dispute_resolution, fixed_duration_bond
+    UnsupportedToken = 213,
+
     // --- Attestation (300-399) ---
     /// An attestation already exists from this attester for this bond.
     /// Replaces: panic!("duplicate attestation")
@@ -274,20 +279,13 @@ pub enum ContractError {
     /// Contracts: treasury
     InsufficientApprovals = 605,
 
-    /// Unauthorized caller attempted restricted operation.
-    /// Replaces: panic!("unauthorized")
+    /// Flashloan callback returned an invalid magic value.
     /// Contracts: treasury
-    Unauthorized = 606,
+    InvalidFlashLoanCallback = 606,
 
-    /// Invalid address provided (e.g., zero address).
-    /// Replaces: panic!("invalid address")
+    /// Flashloan principal plus fee was not fully repaid.
     /// Contracts: treasury
-    InvalidAddress = 607,
-
-    /// Rescue amount exceeds available rescueable balance.
-    /// Replaces: panic!("exceeds rescueable amount")
-    /// Contracts: treasury
-    ExceedsRescueableAmount = 608,
+    FlashLoanRepaymentFailed = 607,
 
     // --- Arithmetic (700-799) ---
     /// Integer overflow detected during a checked arithmetic operation.
@@ -339,7 +337,8 @@ impl ErrorExt for ContractError {
             | ContractError::NegativeStake
             | ContractError::EarlyExitConfigNotSet
             | ContractError::InvalidPenaltyBps
-            | ContractError::LeverageExceeded => ErrorCategory::Bond,
+            | ContractError::LeverageExceeded
+            | ContractError::UnsupportedToken => ErrorCategory::Bond,
 
             ContractError::DuplicateAttestation
             | ContractError::AttestationNotFound
@@ -365,9 +364,8 @@ impl ErrorExt for ContractError {
             | ContractError::ProposalNotFound
             | ContractError::ProposalAlreadyExecuted
             | ContractError::InsufficientApprovals
-            | ContractError::Unauthorized
-            | ContractError::InvalidAddress
-            | ContractError::ExceedsRescueableAmount => ErrorCategory::Treasury,
+            | ContractError::InvalidFlashLoanCallback
+            | ContractError::FlashLoanRepaymentFailed => ErrorCategory::Treasury,
 
             ContractError::Overflow | ContractError::Underflow => ErrorCategory::Arithmetic,
         }
@@ -404,6 +402,7 @@ impl ErrorExt for ContractError {
             }
             ContractError::InvalidPenaltyBps => "Penalty bps must be in range 0-10000",
             ContractError::LeverageExceeded => "Resulting leverage exceeds the configured maximum",
+            ContractError::UnsupportedToken => "Token transfer resulted in different amount than requested (fee-on-transfer tokens not supported)",
             ContractError::DuplicateAttestation => "Attestation already exists from this attester",
             ContractError::AttestationNotFound => "No attestation found for the given key",
             ContractError::AttestationAlreadyRevoked => "Attestation has already been revoked",
@@ -443,9 +442,12 @@ impl ErrorExt for ContractError {
             ContractError::InsufficientApprovals => {
                 "Proposal does not have enough approvals to execute"
             }
-            ContractError::Unauthorized => "Unauthorized caller attempted restricted operation",
-            ContractError::InvalidAddress => "Invalid address provided (e.g., zero address)",
-            ContractError::ExceedsRescueableAmount => "Rescue amount exceeds available rescueable balance",
+            ContractError::InvalidFlashLoanCallback => {
+                "Flashloan callback returned an invalid magic value"
+            }
+            ContractError::FlashLoanRepaymentFailed => {
+                "Flashloan principal plus fee was not fully repaid"
+            }
             ContractError::Overflow => "Integer overflow in checked arithmetic",
             ContractError::Underflow => "Integer underflow in checked arithmetic",
         }

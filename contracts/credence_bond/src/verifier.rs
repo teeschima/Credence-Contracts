@@ -12,9 +12,9 @@
 //! Note: `DataKey::AttesterStake(verifier)` is kept in sync with the staked amount so that
 //! weighted attestations can use real stake.
 
-use soroban_sdk::token::TokenClient;
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
+use crate::safe_token;
 use crate::weighted_attestation;
 use crate::DataKey;
 
@@ -156,13 +156,7 @@ pub fn register_with_stake(e: &Env, verifier: &Address, stake_deposit: i128) -> 
 
     // Interactions: pull stake from verifier into this contract.
     if stake_deposit > 0 {
-        let token: Address = e
-            .storage()
-            .instance()
-            .get(&DataKey::BondToken)
-            .unwrap_or_else(|| panic!("token not set"));
-        let contract = e.current_contract_address();
-        TokenClient::new(e, &token).transfer_from(&contract, verifier, &contract, &stake_deposit);
+        safe_token::safe_transfer_from(e, verifier, stake_deposit);
     }
 
     emit_registration_event(e, verifier, stake_deposit, info.stake, min_stake, kind);
@@ -265,13 +259,13 @@ pub fn withdraw_stake(e: &Env, verifier: &Address, amount: i128) -> VerifierInfo
     put_verifier_info(e, verifier, &info);
     weighted_attestation::set_attester_stake(e, verifier, info.stake);
 
-    let token: Address = e
+    let _token: Address = e
         .storage()
         .instance()
         .get(&DataKey::BondToken)
         .unwrap_or_else(|| panic!("token not set"));
-    let contract = e.current_contract_address();
-    TokenClient::new(e, &token).transfer(&contract, verifier, &amount);
+
+    safe_token::safe_transfer(e, verifier, amount);
 
     e.events().publish(
         (Symbol::new(e, EVENT_STAKE_WITHDRAWN), verifier.clone()),

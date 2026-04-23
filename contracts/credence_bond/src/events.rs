@@ -1,4 +1,37 @@
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{Address, Env, String, Symbol};
+
+/// Emitted when a new bond is created.
+///
+/// # Topics (Indexed)
+/// * `Symbol` - "bond_created_v2"
+/// * `Address` - The identity owning the bond
+/// * `i128` - The initial bonded amount (indexed for amount-based queries)
+/// * `u64` - The bond start timestamp (indexed for time-based queries)
+///
+/// # Data
+/// * `u64` - The duration of the bond in seconds
+/// * `bool` - Whether the bond is rolling
+/// * `u64` - Bond end timestamp (calculated)
+pub fn emit_bond_created_v2(
+    e: &Env,
+    identity: &Address,
+    amount: i128,
+    duration: u64,
+    is_rolling: bool,
+    start_timestamp: u64,
+) {
+    let topics = (
+        Symbol::new(e, "bond_created_v2"),
+        identity.clone(),
+        amount,
+        start_timestamp,
+    );
+    let end_timestamp = start_timestamp
+        .checked_add(duration)
+        .expect("timestamp overflow");
+    let data = (duration, is_rolling, end_timestamp);
+    e.events().publish(topics, data);
+}
 
 /// Emitted when a new bond is created.
 ///
@@ -10,6 +43,8 @@ use soroban_sdk::{Address, Env, Symbol};
 /// * `i128` - The initial bonded amount
 /// * `u64` - The duration of the bond in seconds
 /// * `bool` - Whether the bond is rolling
+///
+/// @deprecated Use emit_bond_created_v2 for better indexing
 pub fn emit_bond_created(
     e: &Env,
     identity: &Address,
@@ -24,6 +59,39 @@ pub fn emit_bond_created(
 
 /// Emitted when an existing bond is increased (topped up).
 ///
+/// # Topics (Indexed)
+/// * `Symbol` - "bond_increased_v2"
+/// * `Address` - The identity owning the bond
+/// * `i128` - The additional amount added (indexed for amount-based queries)
+/// * `i128` - The new total bonded amount (indexed for balance queries)
+/// * `u64` - The increase timestamp (indexed for time-based queries)
+///
+/// # Data
+/// * `bool` - Whether this increase crossed a tier threshold
+/// * `crate::BondTier` - New bond tier after increase
+#[allow(dead_code)]
+pub fn emit_bond_increased_v2(
+    e: &Env,
+    identity: &Address,
+    added_amount: i128,
+    new_total: i128,
+    timestamp: u64,
+    tier_changed: bool,
+    new_tier: crate::BondTier,
+) {
+    let topics = (
+        Symbol::new(e, "bond_increased_v2"),
+        identity.clone(),
+        added_amount,
+        new_total,
+        timestamp,
+    );
+    let data = (tier_changed, new_tier);
+    e.events().publish(topics, data);
+}
+
+/// Emitted when an existing bond is increased (topped up).
+///
 /// # Topics
 /// * `Symbol` - "bond_increased"
 /// * `Address` - The identity owning the bond
@@ -31,9 +99,44 @@ pub fn emit_bond_created(
 /// # Data
 /// * `i128` - The additional amount added
 /// * `i128` - The new total bonded amount
+///
+/// @deprecated Use emit_bond_increased_v2 for better indexing
+#[allow(dead_code)]
 pub fn emit_bond_increased(e: &Env, identity: &Address, added_amount: i128, new_total: i128) {
     let topics = (Symbol::new(e, "bond_increased"), identity.clone());
     let data = (added_amount, new_total);
+    e.events().publish(topics, data);
+}
+
+/// Emitted when funds are successfully withdrawn from a bond.
+///
+/// # Topics (Indexed)
+/// * `Symbol` - "bond_withdrawn_v2"
+/// * `Address` - The identity owning the bond
+/// * `i128` - The amount withdrawn (indexed for amount-based queries)
+/// * `i128` - The remaining bonded amount (indexed for balance queries)
+/// * `u64` - The withdrawal timestamp (indexed for time-based queries)
+///
+/// # Data
+/// * `bool` - Whether this was an early withdrawal (penalty applied)
+/// * `i128` - Penalty amount if early withdrawal
+pub fn emit_bond_withdrawn_v2(
+    e: &Env,
+    identity: &Address,
+    amount_withdrawn: i128,
+    remaining: i128,
+    timestamp: u64,
+    is_early: bool,
+    penalty_amount: i128,
+) {
+    let topics = (
+        Symbol::new(e, "bond_withdrawn_v2"),
+        identity.clone(),
+        amount_withdrawn,
+        remaining,
+        timestamp,
+    );
+    let data = (is_early, penalty_amount);
     e.events().publish(topics, data);
 }
 
@@ -46,9 +149,46 @@ pub fn emit_bond_increased(e: &Env, identity: &Address, added_amount: i128, new_
 /// # Data
 /// * `i128` - The amount withdrawn
 /// * `i128` - The remaining bonded amount
+///
+/// @deprecated Use emit_bond_withdrawn_v2 for better indexing
 pub fn emit_bond_withdrawn(e: &Env, identity: &Address, amount_withdrawn: i128, remaining: i128) {
     let topics = (Symbol::new(e, "bond_withdrawn"), identity.clone());
     let data = (amount_withdrawn, remaining);
+    e.events().publish(topics, data);
+}
+
+/// Emitted when a bond is slashed by an admin.
+///
+/// # Topics (Indexed)
+/// * `Symbol` - "bond_slashed_v2"
+/// * `Address` - The identity owning the bond
+/// * `i128` - The amount slashed in this event (indexed for amount-based queries)
+/// * `i128` - The new total slashed amount for this bond (indexed for tracking)
+/// * `u64` - The slash timestamp (indexed for time-based queries)
+/// * `Address` - The admin who performed the slash (indexed for accountability)
+///
+/// # Data
+/// * `String` - Reason for the slash
+/// * `bool` - Whether this was a full slash (bond completely liquidated)
+pub fn emit_bond_slashed_v2(
+    e: &Env,
+    identity: &Address,
+    slash_amount: i128,
+    total_slashed: i128,
+    timestamp: u64,
+    admin: &Address,
+    reason: String,
+    is_full_slash: bool,
+) {
+    let topics = (
+        Symbol::new(e, "bond_slashed_v2"),
+        identity.clone(),
+        slash_amount,
+        total_slashed,
+        timestamp,
+        admin.clone(),
+    );
+    let data = (reason, is_full_slash);
     e.events().publish(topics, data);
 }
 
@@ -61,11 +201,15 @@ pub fn emit_bond_withdrawn(e: &Env, identity: &Address, amount_withdrawn: i128, 
 /// # Data
 /// * `i128` - The amount slashed in this event
 /// * `i128` - The new total slashed amount for this bond
+///
+/// @deprecated Use emit_bond_slashed_v2 for better indexing
+#[allow(dead_code)]
 pub fn emit_bond_slashed(e: &Env, identity: &Address, slash_amount: i128, total_slashed: i128) {
     let topics = (Symbol::new(e, "bond_slashed"), identity.clone());
     let data = (slash_amount, total_slashed);
     e.events().publish(topics, data);
 }
+
 /// Emitted when a new claim is added for a user.
 ///
 /// # Topics
@@ -123,62 +267,31 @@ pub fn emit_claims_expired(e: &Env, user: &Address, expired_count: u32, expired_
 }
 
 /// Emitted when upgrade authorization is initialized.
-///
-/// # Topics
-/// * `Symbol` - "upgrade_auth_initialized"
-/// * `Address` - The upgrade admin address
 pub fn emit_upgrade_auth_initialized(e: &Env, admin: &Address) {
-    let topics = (Symbol::new(e, "upgrade_auth_initialized"), admin.clone());
+    let topics = (Symbol::new(e, "upgrade_auth_init"), admin.clone());
     e.events().publish(topics, ());
 }
 
 /// Emitted when upgrade authorization is granted.
-///
-/// # Topics
-/// * `Symbol` - "upgrade_auth_granted"
-/// * `Address` - The admin who granted authorization
-/// * `Address` - The address that received authorization
-///
-/// # Data
-/// * `crate::upgrade_auth::UpgradeRole` - The role granted
 pub fn emit_upgrade_auth_granted(
     e: &Env,
     admin: &Address,
     address: &Address,
     role: crate::upgrade_auth::UpgradeRole,
 ) {
-    let topics = (
-        Symbol::new(e, "upgrade_auth_granted"),
-        admin.clone(),
-        address.clone(),
-    );
-    e.events().publish(topics, role);
+    let topics = (Symbol::new(e, "upgrade_auth_granted"), admin.clone());
+    let data = (address.clone(), role);
+    e.events().publish(topics, data);
 }
 
 /// Emitted when upgrade authorization is revoked.
-///
-/// # Topics
-/// * `Symbol` - "upgrade_auth_revoked"
-/// * `Address` - The admin who revoked authorization
-/// * `Address` - The address whose authorization was revoked
 pub fn emit_upgrade_auth_revoked(e: &Env, admin: &Address, address: &Address) {
-    let topics = (
-        Symbol::new(e, "upgrade_auth_revoked"),
-        admin.clone(),
-        address.clone(),
-    );
-    e.events().publish(topics, ());
+    let topics = (Symbol::new(e, "upgrade_auth_revoked"), admin.clone());
+    let data = address.clone();
+    e.events().publish(topics, data);
 }
 
 /// Emitted when an upgrade is proposed.
-///
-/// # Topics
-/// * `Symbol` - "upgrade_proposed"
-/// * `Address` - The proposer address
-///
-/// # Data
-/// * `u64` - The proposal ID
-/// * `Address` - The new implementation address
 pub fn emit_upgrade_proposed(
     e: &Env,
     proposer: &Address,
@@ -186,42 +299,25 @@ pub fn emit_upgrade_proposed(
     new_implementation: &Address,
 ) {
     let topics = (Symbol::new(e, "upgrade_proposed"), proposer.clone());
-    let data = (proposal_id, new_implementation);
+    let data = (proposal_id, new_implementation.clone());
     e.events().publish(topics, data);
 }
 
 /// Emitted when an upgrade proposal is approved.
-///
-/// # Topics
-/// * `Symbol` - "upgrade_approved"
-/// * `Address` - The approver address
-///
-/// # Data
-/// * `u64` - The proposal ID
 pub fn emit_upgrade_approved(e: &Env, approver: &Address, proposal_id: u64) {
     let topics = (Symbol::new(e, "upgrade_approved"), approver.clone());
-    e.events().publish(topics, proposal_id);
+    let data = proposal_id;
+    e.events().publish(topics, data);
 }
 
 /// Emitted when an upgrade is executed.
-///
-/// # Topics
-/// * `Symbol` - "upgrade_executed"
-/// * `Address` - The executor address
-/// * `Address` - The new implementation address
-///
-/// # Data
-/// * `Option<u64>` - The proposal ID (if any)
 pub fn emit_upgrade_executed(
     e: &Env,
     executor: &Address,
     new_implementation: &Address,
     proposal_id: Option<u64>,
 ) {
-    let topics = (
-        Symbol::new(e, "upgrade_executed"),
-        executor.clone(),
-        new_implementation.clone(),
-    );
-    e.events().publish(topics, proposal_id);
+    let topics = (Symbol::new(e, "upgrade_executed"), executor.clone());
+    let data = (new_implementation.clone(), proposal_id);
+    e.events().publish(topics, data);
 }

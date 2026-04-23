@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use crate::{CredenceRegistry, CredenceRegistryClient, IFACE_CREDENCE_BOND_V1};
+use crate::{CredenceRegistry, CredenceRegistryClient};
 use soroban_sdk::{testutils::Address as _, Env};
 
 mod compliant {
@@ -40,8 +40,8 @@ mod lying {
     }
 }
 
-fn setup(e: &Env) -> CredenceRegistryClient {
-    let id = e.register_contract(None, CredenceRegistry);
+fn setup(e: &Env) -> CredenceRegistryClient<'_> {
+    let id = e.register(CredenceRegistry, ());
     let client = CredenceRegistryClient::new(e, &id);
     let admin = soroban_sdk::Address::generate(e);
     e.mock_all_auths();
@@ -55,7 +55,7 @@ fn test_compliant_bond_registers() {
     e.mock_all_auths();
     let client = setup(&e);
     let identity = soroban_sdk::Address::generate(&e);
-    let bond_id = e.register_contract(None, compliant::CompliantBond);
+    let bond_id = e.register(compliant::CompliantBond, ());
     let entry = client.register(&identity, &bond_id, &false);
     assert!(entry.active);
 }
@@ -67,7 +67,7 @@ fn test_non_compliant_bond_reverts() {
     e.mock_all_auths();
     let client = setup(&e);
     let identity = soroban_sdk::Address::generate(&e);
-    let bond_id = e.register_contract(None, non_compliant::NonCompliantBond);
+    let bond_id = e.register(non_compliant::NonCompliantBond, ());
     client.register(&identity, &bond_id, &false);
 }
 
@@ -78,7 +78,7 @@ fn test_lying_bond_reverts() {
     e.mock_all_auths();
     let client = setup(&e);
     let identity = soroban_sdk::Address::generate(&e);
-    let bond_id = e.register_contract(None, lying::LyingBond);
+    let bond_id = e.register(lying::LyingBond, ());
     client.register(&identity, &bond_id, &false);
 }
 
@@ -88,7 +88,7 @@ fn test_non_compliant_allowed_when_explicit() {
     e.mock_all_auths();
     let client = setup(&e);
     let identity = soroban_sdk::Address::generate(&e);
-    let bond_id = e.register_contract(None, non_compliant::NonCompliantBond);
+    let bond_id = e.register(non_compliant::NonCompliantBond, ());
     let entry = client.register(&identity, &bond_id, &true);
     assert!(entry.active);
 }

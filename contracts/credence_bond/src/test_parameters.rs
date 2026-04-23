@@ -719,3 +719,149 @@ fn test_max_values_for_all_parameters() {
     assert_eq!(client.get_gold_threshold(), MAX_GOLD_THRESHOLD);
     assert_eq!(client.get_platinum_threshold(), MAX_PLATINUM_THRESHOLD);
 }
+
+// ============================================================================
+// Category 10: Event Argument Verification (issue #138)
+// ============================================================================
+
+#[test]
+fn test_protocol_fee_event_args() {
+    let e = Env::default();
+    let (client, admin) = setup(&e);
+
+    // Set to 100 first so old_value is known
+    client.set_protocol_fee_bps(&admin, &100);
+    // Now update: old=100, new=200
+    client.set_protocol_fee_bps(&admin, &200);
+
+    let events = e.events().all();
+    // Find the last parameter_changed event
+    let last = events.iter().rev().find(|(_, topics, _)| {
+        if let soroban_sdk::Val::Symbol(s) = topics.get(0).unwrap() {
+            s == soroban_sdk::Symbol::new(&e, "parameter_changed")
+        } else {
+            false
+        }
+    });
+    assert!(last.is_some(), "parameter_changed event not emitted");
+    let (_, _, data) = last.unwrap();
+    // data = (parameter_name, old_value, new_value, caller, timestamp)
+    let (_, old_val, new_val, _, _): (soroban_sdk::String, i128, i128, Address, u64) =
+        data.into_val(&e);
+    assert_eq!(old_val, 100i128, "old_value mismatch");
+    assert_eq!(new_val, 200i128, "new_value mismatch");
+}
+
+#[test]
+fn test_attestation_fee_event_args() {
+    let e = Env::default();
+    let (client, admin) = setup(&e);
+
+    client.set_attestation_fee_bps(&admin, &25);
+    client.set_attestation_fee_bps(&admin, &50);
+
+    let events = e.events().all();
+    let last = events.iter().rev().find(|(_, topics, _)| {
+        if let soroban_sdk::Val::Symbol(s) = topics.get(0).unwrap() {
+            s == soroban_sdk::Symbol::new(&e, "parameter_changed")
+        } else {
+            false
+        }
+    });
+    assert!(last.is_some(), "parameter_changed event not emitted");
+    let (_, _, data) = last.unwrap();
+    let (_, old_val, new_val, _, _): (soroban_sdk::String, i128, i128, Address, u64) =
+        data.into_val(&e);
+    assert_eq!(old_val, 25i128);
+    assert_eq!(new_val, 50i128);
+}
+
+#[test]
+fn test_withdrawal_cooldown_event_args() {
+    let e = Env::default();
+    let (client, admin) = setup(&e);
+
+    client.set_withdrawal_cooldown_secs(&admin, &3600);
+    client.set_withdrawal_cooldown_secs(&admin, &7200);
+
+    let events = e.events().all();
+    let last = events.iter().rev().find(|(_, topics, _)| {
+        if let soroban_sdk::Val::Symbol(s) = topics.get(0).unwrap() {
+            s == soroban_sdk::Symbol::new(&e, "parameter_changed")
+        } else {
+            false
+        }
+    });
+    assert!(last.is_some());
+    let (_, _, data) = last.unwrap();
+    let (_, old_val, new_val, _, _): (soroban_sdk::String, i128, i128, Address, u64) =
+        data.into_val(&e);
+    assert_eq!(old_val, 3600i128);
+    assert_eq!(new_val, 7200i128);
+}
+
+#[test]
+fn test_pause_signer_event_includes_old_and_new() {
+    let e = Env::default();
+    let (client, admin) = setup(&e);
+    let signer = Address::generate(&e);
+
+    // Enable signer: old=false, new=true
+    client.set_pause_signer(&admin, &signer, &true);
+
+    let events = e.events().all();
+    let ev = events.iter().rev().find(|(_, topics, _)| {
+        if let soroban_sdk::Val::Symbol(s) = topics.get(0).unwrap() {
+            s == soroban_sdk::Symbol::new(&e, "pause_signer_set")
+        } else {
+            false
+        }
+    });
+    assert!(ev.is_some(), "pause_signer_set event not emitted");
+    let (_, _, data) = ev.unwrap();
+    let (old_val, new_val): (bool, bool) = data.into_val(&e);
+    assert!(!old_val, "old_enabled should be false");
+    assert!(new_val, "new_enabled should be true");
+}
+
+#[test]
+fn test_pause_threshold_event_includes_old_and_new() {
+    let e = Env::default();
+    let (client, admin) = setup(&e);
+    let signer = Address::generate(&e);
+
+    // Add signer first so threshold can be set to 1
+    client.set_pause_signer(&admin, &signer, &true);
+    client.set_pause_threshold(&admin, &1);
+
+    let events = e.events().all();
+    let ev = events.iter().rev().find(|(_, topics, _)| {
+        if let soroban_sdk::Val::Symbol(s) = topics.get(0).unwrap() {
+            s == soroban_sdk::Symbol::new(&e, "pause_threshold_set")
+        } else {
+            false
+        }
+    });
+    assert!(ev.is_some(), "pause_threshold_set event not emitted");
+    let (_, _, data) = ev.unwrap();
+    let (old_val, new_val): (u32, u32) = data.into_val(&e);
+    assert_eq!(old_val, 0u32, "old threshold should be 0");
+    assert_eq!(new_val, 1u32, "new threshold should be 1");
+}
+
+#[test]
+fn test_no_duplicate_events_on_parameter_update() {
+    let e = Env::default();
+    let (client, admin) = setup(&e);
+
+    let events_before = e.events().all().len();
+    client.set_protocol_fee_bps(&admin, &100);
+    let events_after = e.events().all().len();
+
+    // Exactly one event emitted per setter call
+    assert_eq!(
+        events_after - events_before,
+        1,
+        "expected exactly 1 event per setter"
+    );
+}

@@ -72,7 +72,7 @@ pub struct FixedBond {
 5. **Auth required** — `owner.require_auth()` on all mutating owner calls; `caller.require_auth()` + admin equality check on all admin calls.
 6. **CEI pattern** — Bond state (`active = false`) is written to storage _before_ any token transfer.
 7. **Positive amounts only** — `amount <= 0` panics.
-8. **Non-zero duration** — `duration_secs == 0` panics.
+8. **Bounded duration** — duration must be between 1 second and 365 days inclusive; out-of-range values panic.
 
 ---
 

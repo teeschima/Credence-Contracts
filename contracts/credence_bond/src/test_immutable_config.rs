@@ -14,7 +14,7 @@ mod immutable_config_tests {
     fn test_admin_requires_initialization() {
         let env = Env::default();
         let contract = create_contract();
-        let contract_address = env.register_contract(None, contract);
+        let contract_address = env.register(CredenceBond, ());
         let admin = Address::generate(&env);
 
         env.mock_all_auths();
@@ -35,7 +35,7 @@ mod immutable_config_tests {
         let env = Env::default();
         let contract = create_contract();
         let admin = Address::generate(&env);
-        let contract_address = env.register_contract(None, contract);
+        let contract_address = env.register(CredenceBond, ());
 
         env.mock_all_auths();
 
@@ -51,7 +51,7 @@ mod immutable_config_tests {
     fn test_token_requires_initialization() {
         let env = Env::default();
         let contract = create_contract();
-        let contract_address = env.register_contract(None, contract);
+        let contract_address = env.register(CredenceBond, ());
 
         env.mock_all_auths();
         
@@ -71,7 +71,7 @@ mod immutable_config_tests {
         let env = Env::default();
         let contract = create_contract();
         let admin = Address::generate(&env);
-        let contract_address = env.register_contract(None, contract);
+        let contract_address = env.register(CredenceBond, ());
 
         env.mock_all_auths();
 
@@ -95,7 +95,7 @@ mod immutable_config_tests {
         let admin = Address::generate(&env);
         let token1 = Address::generate(&env);
         let token2 = Address::generate(&env);
-        let contract_address = env.register_contract(None, contract);
+        let contract_address = env.register(CredenceBond, ());
 
         env.mock_all_auths();
 

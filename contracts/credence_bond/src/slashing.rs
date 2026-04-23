@@ -100,6 +100,8 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
     // 1. Authorization check
     validate_admin(e, admin);
 
+    crate::same_ledger_liquidation_guard::require_slash_allowed_after_collateral_increase(e);
+
     // 2. Retrieve current bond state
     let key = crate::DataKey::Bond;
     let mut bond = e
@@ -150,6 +152,18 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
 
     // 7. Emit slashing event for off-chain tracking
     emit_slashing_event(e, &bond.identity, actual_slash_amount, bond.slashed_amount);
+
+    // Emit v2 event with enhanced indexing for backward compatibility during migration
+    crate::events::emit_bond_slashed_v2(
+        e,
+        &bond.identity,
+        actual_slash_amount,
+        bond.slashed_amount,
+        e.ledger().timestamp(),
+        admin,
+        soroban_sdk::String::from_str(e, "Slashed by admin"),
+        bond.slashed_amount >= bond.bonded_amount,
+    );
 
     // 8. Return updated bond state
     bond

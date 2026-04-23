@@ -34,6 +34,7 @@ pub fn get_cooldown_period(e: &Env) -> u64 {
 /// Returns `true` when the cooldown window is still active (withdrawal not yet
 /// permitted). A request_time of 0 means no request was made.
 #[must_use]
+#[allow(dead_code)]
 pub fn is_cooldown_active(now: u64, request_time: u64, cooldown_period: u64) -> bool {
     if request_time == 0 {
         return false;

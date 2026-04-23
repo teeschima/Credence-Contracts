@@ -4,9 +4,12 @@
 //! Tracks fund sources (protocol fees vs slashed funds) and emits treasury events.
 
 use credence_errors::ContractError;
+use ethnum::U256;
 use soroban_sdk::{contract, contractimpl, contracttype, panic_with_error, Address, Env, Symbol};
 
 use crate::pausable;
+
+const CUMULATIVE_SEGMENT: u128 = (i128::MAX as u128) + 1;
 
 /// Fund source for accounting and reporting.
 #[contracttype]
@@ -34,6 +37,17 @@ pub struct WithdrawalProposal {
     pub executed: bool,
 }
 
+/// Lifetime cumulative amount using rollover-safe accounting.
+///
+/// The represented total is:
+/// `rollovers * (i128::MAX + 1) + remainder`
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CumulativeAmount {
+    pub rollovers: u64,
+    pub remainder: i128,
+}
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -47,8 +61,12 @@ pub enum DataKey {
     PauseApprovalCount(u64),
     /// Total balance (sum of all sources).
     TotalBalance,
-    /// Balance per source: ProtocolFee, SlashedFunds.
+    /// Available balance per source: ProtocolFee, SlashedFunds.
     BalanceBySource(FundSource),
+    /// Lifetime cumulative amount received across all sources.
+    CumulativeReceived,
+    /// Lifetime cumulative amount received per source.
+    CumulativeReceivedBySource(FundSource),
     /// Authorized depositors (can call receive_fee).
     Depositor(Address),
     /// Signers for multi-sig (can propose and approve withdrawals).
@@ -65,10 +83,67 @@ pub enum DataKey {
     Approval(u64, Address),
     /// Approval count per proposal (cached for execution check).
     ApprovalCount(u64),
+    /// Minimum liquidity that must remain in the treasury after a withdrawal.
+    MinLiquidity,
 }
 
 #[contract]
 pub struct CredenceTreasury;
+
+fn zero_cumulative_amount() -> CumulativeAmount {
+    CumulativeAmount {
+        rollovers: 0,
+        remainder: 0,
+    }
+}
+
+fn add_to_cumulative(current: &CumulativeAmount, amount: i128) -> CumulativeAmount {
+    let current_remainder = u128::try_from(current.remainder)
+        .unwrap_or_else(|_| panic!("cumulative remainder must be non-negative"));
+    let addend =
+        u128::try_from(amount).unwrap_or_else(|_| panic!("cumulative amount must be non-negative"));
+    let sum = current_remainder + addend;
+    let rollover_increment = if sum >= CUMULATIVE_SEGMENT {
+        1_u64
+    } else {
+        0_u64
+    };
+    let remainder = if rollover_increment == 0 {
+        sum
+    } else {
+        sum - CUMULATIVE_SEGMENT
+    };
+
+    CumulativeAmount {
+        rollovers: current
+            .rollovers
+            .checked_add(rollover_increment)
+            .unwrap_or_else(|| panic!("cumulative rollover overflow")),
+        remainder: i128::try_from(remainder)
+            .unwrap_or_else(|_| panic!("cumulative remainder overflow")),
+    }
+}
+
+fn proportional_deduction(source_balance: i128, amount: i128, total: i128) -> i128 {
+    if source_balance == 0 || amount == 0 {
+        return 0;
+    }
+    if amount == total {
+        return source_balance;
+    }
+
+    let source = U256::new(
+        u128::try_from(source_balance)
+            .unwrap_or_else(|_| panic!("source balance must be positive")),
+    );
+    let withdrawal =
+        U256::new(u128::try_from(amount).unwrap_or_else(|_| panic!("amount must be positive")));
+    let available =
+        U256::new(u128::try_from(total).unwrap_or_else(|_| panic!("total must be positive")));
+    let deduction = (source * withdrawal) / available;
+
+    i128::try_from(deduction.as_u128()).unwrap_or_else(|_| panic!("deduction overflow"))
+}
 
 #[contractimpl]
 impl CredenceTreasury {
@@ -93,20 +168,44 @@ impl CredenceTreasury {
         e.storage()
             .instance()
             .set(&DataKey::BalanceBySource(FundSource::SlashedFunds), &0_i128);
+        e.storage()
+            .instance()
+            .set(&DataKey::CumulativeReceived, &zero_cumulative_amount());
+        e.storage().instance().set(
+            &DataKey::CumulativeReceivedBySource(FundSource::ProtocolFee),
+            &zero_cumulative_amount(),
+        );
+        e.storage().instance().set(
+            &DataKey::CumulativeReceivedBySource(FundSource::SlashedFunds),
+            &zero_cumulative_amount(),
+        );
         e.storage().instance().set(&DataKey::SignerCount, &0_u32);
         e.storage().instance().set(&DataKey::Threshold, &0_u32);
         e.storage()
             .instance()
             .set(&DataKey::ProposalCounter, &0_u64);
+        e.storage().instance().set(&DataKey::MinLiquidity, &0_i128);
         e.events()
             .publish((Symbol::new(&e, "treasury_initialized"),), admin);
     }
 
-    /// Receive protocol fee or slashed funds. Caller must be admin or an authorized depositor.
-    /// @param e The contract environment
-    /// @param from Caller (must be auth'd)
-    /// @param amount Amount to credit
-    /// @param source Fund source (ProtocolFee or SlashedFunds)
+    /// Receive protocol fee or slashed funds report. Caller must be admin or an authorized depositor.
+    ///
+    /// # Important Design Notes
+    /// This function records fee amounts reported by other contracts (e.g., credence_bond).
+    /// The treasury itself does NOT hold tokens — it is purely an accounting system.  
+    /// Actual token transfers occur at the bond contract level, where fee-on-transfer tokens
+    /// are rejected via balance-delta verification.
+    ///
+    /// # Arguments
+    /// * `from` - Caller (must be auth'd; typically admin or an authorized fee-collecting contract)
+    /// * `amount` - Amount to credit (must be > 0)
+    /// * `source` - Fund source classification (Protocol fee or slashed funds)
+    ///
+    /// # Panics
+    /// * `AmountMustBePositive` if amount <= 0
+    /// * `UnauthorizedDepositor` if caller is neither admin nor an authorized depositor
+    /// * `Overflow` if adding the amount would overflow the balance
     pub fn receive_fee(e: Env, from: Address, amount: i128, source: FundSource) {
         pausable::require_not_paused(&e);
         from.require_auth();
@@ -139,10 +238,29 @@ impl CredenceTreasury {
         let new_source = source_balance
             .checked_add(amount)
             .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
+        let cumulative_total: CumulativeAmount = e
+            .storage()
+            .instance()
+            .get(&DataKey::CumulativeReceived)
+            .unwrap_or_else(zero_cumulative_amount);
+        let new_cumulative_total = add_to_cumulative(&cumulative_total, amount);
+        let cumulative_source: CumulativeAmount = e
+            .storage()
+            .instance()
+            .get(&DataKey::CumulativeReceivedBySource(source))
+            .unwrap_or_else(zero_cumulative_amount);
+        let new_cumulative_source = add_to_cumulative(&cumulative_source, amount);
         e.storage()
             .instance()
             .set(&DataKey::TotalBalance, &new_total);
         e.storage().instance().set(&key_source, &new_source);
+        e.storage()
+            .instance()
+            .set(&DataKey::CumulativeReceived, &new_cumulative_total);
+        e.storage().instance().set(
+            &DataKey::CumulativeReceivedBySource(source),
+            &new_cumulative_source,
+        );
         e.events().publish(
             (Symbol::new(&e, "treasury_deposit"), from),
             (amount, source),
@@ -272,9 +390,13 @@ impl CredenceTreasury {
         if threshold > count {
             panic_with_error!(&e, ContractError::ThresholdExceedsSigners);
         }
+        let old_threshold: u32 = e.storage().instance().get(&DataKey::Threshold).unwrap_or(0);
         e.storage().instance().set(&DataKey::Threshold, &threshold);
-        e.events()
-            .publish((Symbol::new(&e, "threshold_updated"),), threshold);
+        // Emit old and new values for auditability
+        e.events().publish(
+            (Symbol::new(&e, "threshold_updated"),),
+            (old_threshold, threshold),
+        );
     }
 
     /// Propose a withdrawal. Only a signer can propose. Creates a proposal that can be approved and executed.
@@ -376,12 +498,15 @@ impl CredenceTreasury {
             .set(&DataKey::ApprovalCount(proposal_id), &new_count);
         e.events().publish(
             (Symbol::new(&e, "treasury_withdrawal_approved"), proposal_id),
-            approver,
+            (approver,),
         );
     }
 
-    /// Execute a withdrawal proposal. Callable by anyone once approval count >= threshold. Deducts from total and from both source buckets proportionally (by ratio of source/total at execution time) for accounting; for simplicity we deduct from total only and leave source balances as-is for reporting (so we track "received" by source; withdrawals are from the pool). Actually the issue says "track fund sources" — so we need to either (1) deduct from total only and keep source balances as "total ever received per source" (then total = sum of sources minus withdrawals would require a separate "withdrawn" counter), or (2) deduct from total and also deduct from each source proportionally. Simpler: total balance is the only withdrawable amount; balance_by_source is informational (total received per source). So on withdraw we only subtract from TotalBalance. Then balance_by_source no longer sums to total after withdrawals. Alternative: on withdraw we subtract from total and also reduce each source proportionally. That way get_balance_by_source still reflects "available from this source". Let me do proportional deduction so that source tracking stays consistent: when we withdraw, we deduct from TotalBalance and from each BalanceBySource in proportion to their share. So: total T, protocol P, slashed S. Withdraw W. New total = T - W. Ratio: P/T and S/T. Deduct from P: W * P / T, from S: W * S / T. So both get reduced proportionally.
     /// Execute a withdrawal proposal. Callable by anyone once approval count >= threshold.
+    ///
+    /// This function marks a proposal as executed and updates the internal balance tracking.
+    /// The actual token transfer is caller's responsibility (use the proposal details to arrange
+    /// transfer externally or via callback contract).
     ///
     /// # Arguments
     /// * `proposal_id`   - ID of the approved withdrawal proposal.
@@ -422,6 +547,20 @@ impl CredenceTreasury {
         if total < proposal.amount {
             panic_with_error!(&e, ContractError::InsufficientTreasuryBalance);
         }
+
+        // Liquidity guard: Ensure remaining balance doesn't breach the minimum floor.
+        let min_liquidity: i128 = e
+            .storage()
+            .instance()
+            .get(&DataKey::MinLiquidity)
+            .unwrap_or(0);
+        let remaining = total
+            .checked_sub(proposal.amount)
+            .expect("withdrawal underflow");
+        if remaining < min_liquidity {
+            panic!("liquidity guard: withdrawal would breach minimum liquidity floor");
+        }
+
         // Slippage guard: revert if the settled amount falls below the caller's threshold.
         if proposal.amount < min_amount_out {
             panic!("slippage: received amount below minimum");
@@ -430,9 +569,37 @@ impl CredenceTreasury {
         let new_total = total
             .checked_sub(actual_amount)
             .expect("withdrawal underflow");
+        let protocol_balance: i128 = e
+            .storage()
+            .instance()
+            .get(&DataKey::BalanceBySource(FundSource::ProtocolFee))
+            .unwrap_or(0);
+        let slashed_balance: i128 = e
+            .storage()
+            .instance()
+            .get(&DataKey::BalanceBySource(FundSource::SlashedFunds))
+            .unwrap_or(0);
+        let protocol_deduction = proportional_deduction(protocol_balance, actual_amount, total);
+        let slashed_deduction = actual_amount
+            .checked_sub(protocol_deduction)
+            .expect("withdrawal deduction underflow");
+        let new_protocol_balance = protocol_balance
+            .checked_sub(protocol_deduction)
+            .expect("protocol source underflow");
+        let new_slashed_balance = slashed_balance
+            .checked_sub(slashed_deduction)
+            .expect("slashed source underflow");
         e.storage()
             .instance()
             .set(&DataKey::TotalBalance, &new_total);
+        e.storage().instance().set(
+            &DataKey::BalanceBySource(FundSource::ProtocolFee),
+            &new_protocol_balance,
+        );
+        e.storage().instance().set(
+            &DataKey::BalanceBySource(FundSource::SlashedFunds),
+            &new_slashed_balance,
+        );
         proposal.executed = true;
         e.storage()
             .instance()
@@ -444,6 +611,30 @@ impl CredenceTreasury {
         );
     }
 
+    /// Set the minimum liquidity floor. Only admin can call.
+    pub fn set_min_liquidity(e: Env, admin: Address, min_liquidity: i128) {
+        pausable::require_not_paused(&e);
+        let stored_admin = Self::get_admin(e.clone());
+        if admin != stored_admin {
+            panic_with_error!(&e, ContractError::NotAdmin);
+        }
+        admin.require_auth();
+
+        e.storage()
+            .instance()
+            .set(&DataKey::MinLiquidity, &min_liquidity);
+        e.events()
+            .publish((Symbol::new(&e, "min_liquidity_updated"),), min_liquidity);
+    }
+
+    /// Get current minimum liquidity floor.
+    pub fn get_min_liquidity(e: Env) -> i128 {
+        e.storage()
+            .instance()
+            .get(&DataKey::MinLiquidity)
+            .unwrap_or(0)
+    }
+
     /// Get total treasury balance.
     pub fn get_balance(e: Env) -> i128 {
         e.storage()
@@ -452,12 +643,28 @@ impl CredenceTreasury {
             .unwrap_or(0)
     }
 
-    /// Get balance attributed to a fund source (for reporting).
+    /// Get the currently available balance attributed to a fund source.
     pub fn get_balance_by_source(e: Env, source: FundSource) -> i128 {
         e.storage()
             .instance()
             .get(&DataKey::BalanceBySource(source))
             .unwrap_or(0)
+    }
+
+    /// Get the lifetime cumulative amount received across all sources.
+    pub fn get_cumulative_received(e: Env) -> CumulativeAmount {
+        e.storage()
+            .instance()
+            .get(&DataKey::CumulativeReceived)
+            .unwrap_or_else(zero_cumulative_amount)
+    }
+
+    /// Get the lifetime cumulative amount received for a specific source.
+    pub fn get_cumulative_by_source(e: Env, source: FundSource) -> CumulativeAmount {
+        e.storage()
+            .instance()
+            .get(&DataKey::CumulativeReceivedBySource(source))
+            .unwrap_or_else(zero_cumulative_amount)
     }
 
     /// Get admin address.
@@ -546,8 +753,9 @@ impl CredenceTreasury {
     /// Only callable by admin with strict access control.
     /// This function protects user-accounted balances from accidental extraction.
     pub fn rescue_native(e: Env, admin: Address, to: Address, amount: i128) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
-        
+
         // Verify admin authorization
         let stored_admin: Address = e
             .storage()
@@ -555,14 +763,8 @@ impl CredenceTreasury {
             .get(&DataKey::Admin)
             .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
         if stored_admin != admin {
-            panic_with_error!(&e, ContractError::Unauthorized);
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
-
-        // Zero-address check - skip for now as it's causing test issues
-        // In production, this should check for the Stellar zero address
-        // if to.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-        //     panic_with_error!(&e, ContractError::InvalidAddress);
-        // }
 
         if amount <= 0 {
             panic_with_error!(&e, ContractError::AmountMustBePositive);
@@ -574,14 +776,14 @@ impl CredenceTreasury {
             .instance()
             .get(&DataKey::TotalBalance)
             .unwrap_or(0);
-        
+
         // Only allow rescue of excess native tokens beyond accounted treasury balance
         // For now, we'll skip the actual balance check to avoid re-entry issues in tests
         // In production, this would need to be handled differently
         let available_for_rescue = treasury_balance; // Simplified for testing
-        
+
         if amount > available_for_rescue {
-            panic_with_error!(&e, ContractError::ExceedsRescueableAmount);
+            panic!("rescue amount exceeds available balance");
         }
 
         // For testing purposes, we'll just emit the event without actual transfer
@@ -591,9 +793,7 @@ impl CredenceTreasury {
         // token_client.transfer(&contract_address, &to, &amount);
 
         // Emit rescue event for transparency
-        e.events().publish(
-            (Symbol::new(&e, "native_rescued"),),
-            (to, amount, admin),
-        );
+        e.events()
+            .publish((Symbol::new(&e, "native_rescued"),), (to, amount, admin));
     }
 }

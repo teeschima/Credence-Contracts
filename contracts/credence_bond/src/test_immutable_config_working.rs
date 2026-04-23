@@ -15,7 +15,7 @@ mod immutable_config_tests {
         let env = Env::default();
         let contract = create_contract();
         let admin = Address::generate(&env);
-        let contract_address = env.register_contract(None, contract);
+        let contract_address = env.register(CredenceBond, ());
 
         env.mock_all_auths();
 
@@ -32,7 +32,7 @@ mod immutable_config_tests {
         let env = Env::default();
         let contract = create_contract();
         let admin = Address::generate(&env);
-        let contract_address = env.register_contract(None, contract);
+        let contract_address = env.register(CredenceBond, ());
 
         env.mock_all_auths();
 

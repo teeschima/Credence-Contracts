@@ -14,6 +14,9 @@
 use crate::{tiered_bond, BondTier, DataKey, IdentityBond};
 use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
 
+/// Conservative upper bound to keep batch execution below Soroban budget limits.
+pub const MAX_BATCH_BOND_SIZE: u32 = 20;
+
 /// Parameters for creating a single bond in a batch
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -40,6 +43,12 @@ pub struct BatchBondResult {
     pub bonds: Vec<IdentityBond>,
 }
 
+fn validate_batch_size(params_list: &Vec<BatchBondParams>) {
+    if params_list.len() > MAX_BATCH_BOND_SIZE {
+        panic!("batch too large");
+    }
+}
+
 /// Validate all bonds before execution to ensure atomicity
 ///
 /// # Arguments
@@ -53,6 +62,8 @@ pub fn validate_batch_bonds(e: &Env, params_list: &Vec<BatchBondParams>) {
     if params_list.is_empty() {
         panic!("empty batch");
     }
+
+    validate_batch_size(params_list);
 
     let bond_start = e.ledger().timestamp();
 
@@ -125,7 +136,7 @@ pub fn create_batch_bonds(e: &Env, params_list: Vec<BatchBondParams>) -> BatchBo
 
     // Step 2: Check for existing bonds (before creating any)
     for i in 0..params_list.len() {
-        let params = params_list.get(i).unwrap();
+        let _params = params_list.get(i).unwrap();
         let bond_key = DataKey::Bond; // Note: Current implementation uses single bond
 
         // In a multi-identity system, you'd check per-identity:
@@ -161,6 +172,8 @@ pub fn create_batch_bonds(e: &Env, params_list: Vec<BatchBondParams>) -> BatchBo
 
         bonds.push_back(bond);
     }
+
+    crate::same_ledger_liquidation_guard::record_collateral_increase(e);
 
     let result = BatchBondResult {
         created_count: bonds.len(),
@@ -204,7 +217,14 @@ pub fn validate_batch(e: &Env, params_list: Vec<BatchBondParams>) -> bool {
 ///
 /// # Panics
 /// * If the total amount would overflow i128
+/// * If batch size exceeds MAX_BATCH_BOND_SIZE
 pub fn get_batch_total_amount(params_list: &Vec<BatchBondParams>) -> i128 {
+    if params_list.is_empty() {
+        return 0;
+    }
+
+    validate_batch_size(params_list);
+
     let mut total: i128 = 0;
 
     for i in 0..params_list.len() {

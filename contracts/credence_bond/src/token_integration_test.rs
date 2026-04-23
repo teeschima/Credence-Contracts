@@ -159,7 +159,33 @@ fn test_top_up_requires_remaining_allowance() {
 
     client.set_token(&admin, &token_id);
     client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
-    client.top_up(&1_i128);
+    client.top_up(&1_000_i128);
+}
+
+#[test]
+#[should_panic(expected = "self-approval is not allowed")]
+fn test_create_bond_rejects_contract_self_approval_pattern() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let contract_id = e.register(CredenceBond, ());
+    let client = CredenceBondClient::new(&e, &contract_id);
+    let admin = Address::generate(&e);
+    client.initialize(&admin);
+
+    let token_id = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let stellar_asset = StellarAssetClient::new(&e, &token_id);
+    stellar_asset.set_authorized(&contract_id, &true);
+    stellar_asset.mint(&contract_id, &10_000_i128);
+
+    let token_client = TokenClient::new(&e, &token_id);
+    let expiration = e.ledger().sequence().saturating_add(10_000);
+    token_client.approve(&contract_id, &contract_id, &10_000_i128, &expiration);
+
+    client.set_token(&admin, &token_id);
+    client.create_bond_with_rolling(&contract_id, &1000_i128, &86400_u64, &false, &0_u64);
 }
 
 #[test]
@@ -185,7 +211,7 @@ fn test_withdraw_transfers_tokens_back_to_identity() {
 }
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
+#[should_panic(expected = "top-up amount below minimum required")]
 fn test_top_up_negative_amount_panics() {
     let e = Env::default();
     let (client, _admin, identity, _token_id, _bond_id) = test_helpers::setup_with_token(&e);

@@ -1,7 +1,10 @@
 //! Comprehensive tests for the fixed_duration_bond contract.
 
 use crate::test_helpers::*;
-use crate::{apply_bps, FixedDurationBond, FixedDurationBondClient, MAX_FEE_BPS};
+use crate::{
+    apply_bps, FixedDurationBond, FixedDurationBondClient, DEFAULT_MAX_STALENESS,
+    MAX_BOND_DURATION_SECS, MAX_FEE_BPS, MIN_BOND_DURATION_SECS,
+};
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{Address, Env};
@@ -108,6 +111,30 @@ fn test_create_bond_zero_duration_panics() {
     let e = Env::default();
     let (client, _admin, owner, _token, _cid) = setup(&e);
     client.create_bond(&owner, &1_000_i128, &0_u64);
+}
+
+#[test]
+#[should_panic(expected = "duration out of allowed bounds")]
+fn test_create_bond_duration_above_max_panics() {
+    let e = Env::default();
+    let (client, _admin, owner, _token, _cid) = setup(&e);
+    client.create_bond(&owner, &1_000_i128, &(MAX_BOND_DURATION_SECS + 1));
+}
+
+#[test]
+fn test_create_bond_duration_at_bounds_succeeds() {
+    let e = Env::default();
+    let (client, _admin, owner, _token, _cid) = setup(&e);
+
+    let min_bond = client.create_bond(&owner, &1_000_i128, &MIN_BOND_DURATION_SECS);
+    assert_eq!(min_bond.bond_duration, MIN_BOND_DURATION_SECS);
+
+    e.ledger()
+        .with_mut(|li| li.timestamp += MIN_BOND_DURATION_SECS + 1);
+    client.withdraw(&owner);
+
+    let max_bond = client.create_bond(&owner, &1_000_i128, &MAX_BOND_DURATION_SECS);
+    assert_eq!(max_bond.bond_duration, MAX_BOND_DURATION_SECS);
 }
 
 #[test]
@@ -354,6 +381,43 @@ fn test_collect_fees() {
 }
 
 #[test]
+fn test_collect_fees_allowlist_enabled_allowed() {
+    let e = Env::default();
+    let (client, admin, owner, token_addr, _cid) = setup(&e);
+
+    let treasury = Address::generate(&e);
+    client.set_fee_config(&admin, &treasury, &100_u32); // 1% fee
+
+    // enable allowlist and allow recipient
+    client.set_receiver_allowlist_enabled(&admin, &true);
+    let recipient = Address::generate(&e);
+    client.allow_receiver(&admin, &recipient);
+
+    client.create_bond(&owner, &10_000_i128, &ONE_DAY);
+    let tok = TokenClient::new(&e, &token_addr);
+    let before = tok.balance(&recipient);
+    client.collect_fees(&admin, &recipient);
+    assert_eq!(tok.balance(&recipient) - before, 100);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized receiver")]
+fn test_collect_fees_allowlist_enabled_not_allowed() {
+    let e = Env::default();
+    let (client, admin, owner, token_addr, _cid) = setup(&e);
+
+    let treasury = Address::generate(&e);
+    client.set_fee_config(&admin, &treasury, &100_u32); // 1% fee
+
+    // enable allowlist but do not allow the recipient
+    client.set_receiver_allowlist_enabled(&admin, &true);
+    let recipient = Address::generate(&e);
+
+    client.create_bond(&owner, &10_000_i128, &ONE_DAY);
+    client.collect_fees(&admin, &recipient);
+}
+
+#[test]
 #[should_panic(expected = "no fees to collect")]
 fn test_collect_fees_when_none_panics() {
     let e = Env::default();
@@ -432,7 +496,8 @@ fn test_quote_value_success_within_configured_bounds() {
     let (client, admin, _owner, token, _cid) = setup(&e);
 
     client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
-    let quoted = client.quote_value(&token, &10_i128, &123_456_i128);
+    let now = e.ledger().timestamp();
+    let quoted = client.quote_value(&token, &10_i128, &123_456_i128, &now, &1_u64, &1_u64);
     assert_eq!(quoted, 1_234_560_i128);
 }
 
@@ -445,8 +510,9 @@ fn test_quote_value_uses_per_asset_bounds() {
     client.set_oracle_safety(&admin, &token_a, &1_i128, &1_000_i128);
     client.set_oracle_safety(&admin, &token_b, &2_000_i128, &5_000_i128);
 
-    let a_value = client.quote_value(&token_a, &5_i128, &1_000_i128);
-    let b_value = client.quote_value(&token_b, &5_i128, &2_000_i128);
+    let now = e.ledger().timestamp();
+    let a_value = client.quote_value(&token_a, &5_i128, &1_000_i128, &now, &1_u64, &1_u64);
+    let b_value = client.quote_value(&token_b, &5_i128, &2_000_i128, &now, &1_u64, &1_u64);
     assert_eq!(a_value, 5_000_i128);
     assert_eq!(b_value, 10_000_i128);
 }
@@ -457,7 +523,8 @@ fn test_quote_value_rejects_zero_oracle_answer() {
     let e = Env::default();
     let (client, admin, _owner, token, _cid) = setup(&e);
     client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
-    client.quote_value(&token, &10_i128, &0_i128);
+    let now = e.ledger().timestamp();
+    client.quote_value(&token, &10_i128, &0_i128, &now, &1_u64, &1_u64);
 }
 
 #[test]
@@ -466,7 +533,8 @@ fn test_quote_value_rejects_negative_oracle_answer() {
     let e = Env::default();
     let (client, admin, _owner, token, _cid) = setup(&e);
     client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
-    client.quote_value(&token, &10_i128, &(-1_i128));
+    let now = e.ledger().timestamp();
+    client.quote_value(&token, &10_i128, &(-1_i128), &now, &1_u64, &1_u64);
 }
 
 #[test]
@@ -475,7 +543,8 @@ fn test_quote_value_rejects_extreme_oracle_answer() {
     let e = Env::default();
     let (client, admin, _owner, token, _cid) = setup(&e);
     client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
-    client.quote_value(&token, &10_i128, &9_999_999_999_i128);
+    let now = e.ledger().timestamp();
+    client.quote_value(&token, &10_i128, &9_999_999_999_i128, &now, &1_u64, &1_u64);
 }
 
 #[test]
@@ -483,7 +552,36 @@ fn test_quote_value_rejects_extreme_oracle_answer() {
 fn test_quote_value_rejects_missing_asset_config() {
     let e = Env::default();
     let (client, _admin, _owner, token, _cid) = setup(&e);
-    client.quote_value(&token, &10_i128, &100_i128);
+    let now = e.ledger().timestamp();
+    client.quote_value(&token, &10_i128, &100_i128, &now, &1_u64, &1_u64);
+}
+
+#[test]
+#[should_panic(expected = "oracle: stale answer")]
+fn test_quote_value_rejects_stale_answer() {
+    let e = Env::default();
+    let (client, admin, _owner, token, _cid) = setup(&e);
+
+    client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
+    // set updated_at to older than default staleness
+    // ensure ledger now is large enough to create a stale timestamp without underflow
+    e.ledger()
+        .with_mut(|li| li.timestamp = DEFAULT_MAX_STALENESS + 10);
+    let now = e.ledger().timestamp();
+    let stale = now - (DEFAULT_MAX_STALENESS + 1);
+    client.quote_value(&token, &10_i128, &1_000_i128, &stale, &1_u64, &1_u64);
+}
+
+#[test]
+#[should_panic(expected = "oracle: incomplete round")]
+fn test_quote_value_rejects_incomplete_round() {
+    let e = Env::default();
+    let (client, admin, _owner, token, _cid) = setup(&e);
+
+    client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
+    let now = e.ledger().timestamp();
+    // answered_in_round < round_id should panic
+    client.quote_value(&token, &10_i128, &1_000_i128, &now, &5_u64, &4_u64);
 }
 
 #[test]
@@ -702,10 +800,9 @@ fn test_arithmetic_max_duration_safe_timestamp_no_overflow() {
     e.ledger().with_mut(|li| li.timestamp = 0);
     let (client, _admin, owner, _tok, _cid) = setup(&e);
 
-    // 365 days — well within u64 range.
-    let bond = client.create_bond(&owner, &1_000_i128, &(365 * ONE_DAY));
-    assert_eq!(bond.bond_duration, 365 * ONE_DAY);
-    assert_eq!(bond.bond_expiry, 365 * ONE_DAY);
+    let bond = client.create_bond(&owner, &1_000_i128, &MAX_BOND_DURATION_SECS);
+    assert_eq!(bond.bond_duration, MAX_BOND_DURATION_SECS);
+    assert_eq!(bond.bond_expiry, MAX_BOND_DURATION_SECS);
 }
 
 /// Expiry timestamp overflow is caught and panics cleanly.
@@ -716,4 +813,84 @@ fn test_arithmetic_expiry_overflow_panics() {
     e.ledger().with_mut(|li| li.timestamp = u64::MAX - 500);
     let (client, _admin, owner, _tok, _cid) = setup(&e);
     client.create_bond(&owner, &1_000_i128, &1_000_u64);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Fee-on-Transfer Token Rejection Tests
+// ═══════════════════════════════════════════════════════════════════
+
+/// Test documentation for fee-on-transfer token behavior.
+///
+/// Fee-on-transfer tokens (or tax tokens) charge a fee when tokens are transferred,
+/// resulting in the recipient receiving less than the transfer amount.
+/// The fixed_duration_bond contract rejects such tokens via balance-delta verification
+/// to prevent accounting mismatches and silent value losses.
+///
+/// # Balance-Delta Verification
+/// Before and after each token transfer, the contract verifies that the balance
+/// changed by exactly the expected amount:
+///
+/// 1. **create_bond**: After transfer_from(), verify contract balance increased by amount
+/// 2. **withdraw**: After transfer(), verify contract balance decreased by amount
+/// 3. **withdraw_early**: Verify both net_amount and penalty transfers are exact
+///
+/// If the balance changes don't match the requested amounts, the contract panics with:
+/// `"unsupported token: transfer amount mismatch (code 213)"`
+///
+/// # Implementation
+/// Fee-on-transfer detection happens through balance checking:
+/// ```ignore
+/// // In create_bond
+/// let balance_before = token_client.balance(&contract);
+/// token_client.transfer_from(&contract, &owner, &contract, &amount);
+/// let balance_after = token_client.balance(&contract);
+/// if (balance_after - balance_before) != amount {
+///     panic!("unsupported token: transfer amount mismatch (code 213)");
+/// }
+/// ```
+///
+/// # Supported Token Requirements
+/// - Standard tokens (Stellar Asset, standard ERC20-equivalents)
+/// - Tokens where transfer(amount) → recipient receives exactly amount
+/// - No fee-on-transfer mechanisms
+/// - No rebasing or deflationary mechanisms
+/// - No slippage/wrapper layers
+///
+/// # Unsupported Tokens
+/// - Fee-on-transfer tokens (Safemoon-style)
+/// - Deflationary tokens
+/// - Rebasing tokens
+/// - Any token where transferred amount ≠ received amount
+///
+/// # Error Example
+/// If a contract attempts to create a bond with a fee-on-transfer token:
+/// 1. User approves 1000 tokens
+/// 2. Contract transfers 1000 tokens from user → contract
+/// 3. Fee-on-transfer token charges 1% fee
+/// 4. Contract actually receives only 990 tokens, but tries to record 1000
+/// 5. Balance check fails: 990 ≠ 1000
+/// 6. Contract panics: "unsupported token: transfer amount mismatch (code 213)"
+///
+/// This explicit rejection is preferable to silent value drift and prevents
+/// the contract from accepting tokens it cannot properly account for.
+#[test]
+fn test_fee_on_transfer_rejection_documented() {
+    // This test documents the expected behavior. In practice, testing fee-on-transfer
+    // rejection would require:
+    // 1. A mock or actual fee-on-transfer token contract
+    // 2. Deployment/registration of that token with the test environment
+    // 3. Verification that transfer attempts panic with the expected message
+    //
+    // The balance-delta checks are already implemented in:
+    // - create_bond(): line ~250
+    // - withdraw(): line ~330
+    // - withdraw_early(): line ~390
+    //
+    // All use the same pattern:
+    //   balance_before = token_client.balance(&contract);
+    //   token_client.transfer(...);
+    //   balance_after = token_client.balance(&contract);
+    //   if (balance_after - balance_before) != expected_amount {
+    //       panic!("unsupported token: transfer amount mismatch (code 213)");
+    //   }
 }

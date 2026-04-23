@@ -16,7 +16,7 @@ use crate::math;
 use crate::types::attestation::MAX_ATTESTATION_WEIGHT;
 use crate::DataKey;
 
-/// Default weight multiplier in basis points (1 = 0.01%). Formula: weight = stake * multiplier_bps / 10_000.
+/// Default weight multiplier in basis points (1 = 0.01%). Formula: weight = stake * multiplier_bps / BPS_DENOMINATOR.
 pub const DEFAULT_WEIGHT_MULTIPLIER_BPS: u32 = 100;
 
 /// Default maximum attestation weight when no config is set.
@@ -80,7 +80,7 @@ pub fn compute_weight(e: &Env, attester: &soroban_sdk::Address) -> u32 {
         return DEFAULT_ATTESTATION_WEIGHT;
     }
 
-    // weight = (stake * multiplier_bps / 10_000) capped at max_weight and MAX_ATTESTATION_WEIGHT
+    // weight = (stake * multiplier_bps / BPS_DENOMINATOR) capped at max_weight and MAX_ATTESTATION_WEIGHT
     let stake_u64 = stake.unsigned_abs() as u64;
     let w = math::bps_u64(stake_u64, multiplier_bps, "attestation weight overflow") as u32;
     let capped = core::cmp::min(w, max_weight);

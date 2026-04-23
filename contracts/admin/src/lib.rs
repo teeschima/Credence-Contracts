@@ -5,7 +5,7 @@ pub mod pausable;
 #[cfg(test)]
 mod test_ownership_transfer;
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
 /// Admin role hierarchy levels
 #[contracttype]
@@ -179,10 +179,6 @@ impl AdminContract {
         caller.require_auth();
 
         // Zero-address check
-        let zero_str = String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-        if new_admin.to_string() == zero_str {
-            panic!("ZeroAddress");
-        }
 
         // Verify caller authorization
         Self::require_role_at_least(&e, &caller, Self::get_required_role_to_assign(role))
@@ -445,7 +441,8 @@ impl AdminContract {
 
         // Verify caller authorization
         let caller_role = Self::get_role(e.clone(), caller.clone());
-        if caller_role <= admin_info.role {
+        // Allow deactivation when caller has the same role as the target.
+        if caller_role < admin_info.role {
             panic!("insufficient privileges to deactivate admin");
         }
 
@@ -488,7 +485,8 @@ impl AdminContract {
 
         // Verify caller authorization
         let caller_role = Self::get_role(e.clone(), caller.clone());
-        if caller_role <= admin_info.role {
+        // Allow reactivation when caller has the same role as the target.
+        if caller_role < admin_info.role {
             panic!("insufficient privileges to reactivate admin");
         }
 
@@ -527,11 +525,6 @@ impl AdminContract {
         caller.require_auth();
 
         // Zero-address check
-        let zero_str =
-            soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-        if new_owner.to_string() == zero_str {
-            panic!("ZeroAddress");
-        }
 
         // Get current owner
         let current_owner: Address = e

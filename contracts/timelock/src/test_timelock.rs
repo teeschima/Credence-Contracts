@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use crate::{Timelock, TimelockClient};
+use crate::{Timelock, TimelockClient, EXECUTION_GRACE_PERIOD};
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Address, Env, Symbol};
 
@@ -11,6 +11,16 @@ fn setup(e: &Env) -> (TimelockClient<'_>, Address, Address) {
     let governance = Address::generate(e);
     e.mock_all_auths();
     client.initialize(&admin, &governance, &86400);
+    (client, admin, governance)
+}
+
+fn setup_with_delay(e: &Env, min_delay: u64) -> (TimelockClient<'_>, Address, Address) {
+    let contract_id = e.register(Timelock, ());
+    let client = TimelockClient::new(e, &contract_id);
+    let admin = Address::generate(e);
+    let governance = Address::generate(e);
+    e.mock_all_auths();
+    client.initialize(&admin, &governance, &min_delay);
     (client, admin, governance)
 }
 
@@ -61,8 +71,63 @@ fn test_propose_change() {
     assert_eq!(change.new_value, 500);
     assert_eq!(change.proposed_at, 1000);
     assert_eq!(change.eta, 1000 + 86400);
+    assert_eq!(change.expires_at, 1000 + 86400 + EXECUTION_GRACE_PERIOD);
+    assert_eq!(change.min_delay_at_queue, 86400);
     assert!(!change.executed);
     assert!(!change.cancelled);
+}
+
+#[test]
+fn test_queue_change_with_exact_min_delay_eta() {
+    let e = Env::default();
+    let (client, admin, _gov) = setup_with_delay(&e, 10);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let key = Symbol::new(&e, "slash_rate");
+    let eta = 1010;
+    let id = client.queue_change(&admin, &key, &500, &eta);
+    let change = client.get_change(&id);
+
+    assert_eq!(change.eta, eta);
+    assert_eq!(change.expires_at, eta + EXECUTION_GRACE_PERIOD);
+    assert_eq!(change.min_delay_at_queue, 10);
+}
+
+#[test]
+#[should_panic(expected = "eta must satisfy min delay")]
+fn test_queue_change_eta_too_early_fails() {
+    let e = Env::default();
+    let (client, admin, _gov) = setup_with_delay(&e, 10);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let key = Symbol::new(&e, "slash_rate");
+    client.queue_change(&admin, &key, &500, &1009);
+}
+
+#[test]
+#[should_panic(expected = "timelock delay has not elapsed")]
+fn test_execute_change_at_eta_minus_one_boundary_fails() {
+    let e = Env::default();
+    let (client, admin, _gov) = setup_with_delay(&e, 10);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let key = Symbol::new(&e, "fee_bps");
+    let id = client.queue_change(&admin, &key, &250, &1010);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1009;
+    });
+
+    client.execute_change(&id);
 }
 
 #[test]
@@ -98,6 +163,107 @@ fn test_execute_change_after_delay() {
     client.execute_change(&id);
     let change = client.get_change(&id);
     assert!(change.executed);
+}
+
+#[test]
+fn test_execute_change_at_eta_boundary() {
+    let e = Env::default();
+    let (client, admin, _gov) = setup_with_delay(&e, 10);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let key = Symbol::new(&e, "fee_bps");
+    let id = client.propose_change(&admin, &key, &250);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1010;
+    });
+
+    client.execute_change(&id);
+    let change = client.get_change(&id);
+    assert!(change.executed);
+}
+
+#[test]
+fn test_execute_change_at_expiration_boundary() {
+    let e = Env::default();
+    let (client, admin, _gov) = setup_with_delay(&e, 10);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let key = Symbol::new(&e, "fee_bps");
+    let id = client.propose_change(&admin, &key, &250);
+    let change = client.get_change(&id);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = change.expires_at;
+    });
+
+    client.execute_change(&id);
+    assert!(client.get_change(&id).executed);
+}
+
+#[test]
+fn test_grace_window_is_inclusive_until_expires_at() {
+    let e = Env::default();
+    let (client, admin, _gov) = setup_with_delay(&e, 10);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let key_just_before_expiry = Symbol::new(&e, "fee_grace_1");
+    let eta = 1010;
+    let id_just_before_expiry = client.queue_change(&admin, &key_just_before_expiry, &250, &eta);
+    let change_just_before_expiry = client.get_change(&id_just_before_expiry);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = change_just_before_expiry.expires_at - 1;
+    });
+
+    client.execute_change(&id_just_before_expiry);
+    assert!(client.get_change(&id_just_before_expiry).executed);
+
+    let key_at_expiry = Symbol::new(&e, "fee_grace_2");
+    let second_proposal_time = 2000;
+    e.ledger().with_mut(|li| {
+        li.timestamp = second_proposal_time;
+    });
+    let id_at_expiry =
+        client.queue_change(&admin, &key_at_expiry, &300, &(second_proposal_time + 10));
+    let change_at_expiry = client.get_change(&id_at_expiry);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = change_at_expiry.expires_at;
+    });
+
+    client.execute_change(&id_at_expiry);
+    assert!(client.get_change(&id_at_expiry).executed);
+}
+
+#[test]
+#[should_panic(expected = "execution window expired")]
+fn test_execute_change_after_expiration_fails() {
+    let e = Env::default();
+    let (client, admin, _gov) = setup_with_delay(&e, 10);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let key = Symbol::new(&e, "fee_bps");
+    let id = client.propose_change(&admin, &key, &250);
+    let change = client.get_change(&id);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = change.expires_at + 1;
+    });
+
+    client.execute_change(&id);
 }
 
 #[test]
@@ -310,4 +476,69 @@ fn test_get_change_not_found() {
     let e = Env::default();
     let (client, _admin, _gov) = setup(&e);
     let _ = client.get_change(&999);
+}
+
+#[test]
+#[should_panic(expected = "already initialized")]
+fn test_initialize_already_initialized_fails() {
+    let e = Env::default();
+    let (client, admin, governance) = setup(&e);
+    client.initialize(&admin, &governance, &86400);
+}
+
+#[test]
+fn test_execute_window_boundary_checks() {
+    let e = Env::default();
+    let (client, admin, _gov) = setup_with_delay(&e, 10);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let key = Symbol::new(&e, "test_param");
+    let id = client.propose_change(&admin, &key, &123);
+    let change = client.get_change(&id);
+    let eta = change.eta; // 1010
+    let expires = change.expires_at; // 1010 + 86400
+
+    // 1. Exactly at ETA should work
+    e.ledger().with_mut(|li| {
+        li.timestamp = eta;
+    });
+    client.execute_change(&id);
+    assert!(client.get_change(&id).executed);
+
+    // 2. Propose another one to test expiry boundary
+    let id2 = client.propose_change(&admin, &key, &456);
+    let change2 = client.get_change(&id2);
+
+    // Exactly at expires_at should work
+    e.ledger().with_mut(|li| {
+        li.timestamp = change2.expires_at;
+    });
+    client.execute_change(&id2);
+    assert!(client.get_change(&id2).executed);
+}
+
+#[test]
+fn test_cancel_expired_change() {
+    let e = Env::default();
+    let (client, admin, gov) = setup_with_delay(&e, 10);
+
+    e.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let key = Symbol::new(&e, "expired_param");
+    let id = client.propose_change(&admin, &key, &789);
+    let change = client.get_change(&id);
+
+    // Move time past expiration
+    e.ledger().with_mut(|li| {
+        li.timestamp = change.expires_at + 1;
+    });
+
+    // Cancelling should still work
+    client.cancel_change(&gov, &id);
+    assert!(client.get_change(&id).cancelled);
 }

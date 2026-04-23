@@ -65,6 +65,8 @@ enum DataKey {
 #[contract]
 pub struct CredenceDelegation;
 
+const MAX_NONCE_INVALIDATION_SPAN: u64 = 10_000;
+
 #[contractimpl]
 impl CredenceDelegation {
     /// Initialize the contract with an admin address.
@@ -278,6 +280,26 @@ impl CredenceDelegation {
     /// building the off-chain payload.
     pub fn get_nonce(e: Env, identity: Address) -> u64 {
         nonce::get_nonce(&e, &identity)
+    }
+
+    /// Invalidate a bounded range of nonces for compromised-key recovery.
+    ///
+    /// Advances nonce to `new_nonce`, invalidating all payloads signed with
+    /// nonces in `[current_nonce, new_nonce)`.
+    ///
+    /// Security properties:
+    /// - Only `identity` can invalidate its own nonce stream.
+    /// - Nonce remains strictly monotonic (`new_nonce` must be greater).
+    /// - Range size is capped to keep gas predictable.
+    pub fn invalidate_nonce_range(e: Env, identity: Address, new_nonce: u64) {
+        pausable::require_not_paused(&e);
+        identity.require_auth();
+        let (from_nonce, to_nonce) =
+            nonce::invalidate_nonce_range(&e, &identity, new_nonce, MAX_NONCE_INVALIDATION_SPAN);
+        e.events().publish(
+            (Symbol::new(&e, "nonce_invalidated"), identity),
+            (from_nonce, to_nonce),
+        );
     }
 
     // -----------------------------------------------------------------------

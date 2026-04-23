@@ -13,7 +13,7 @@ mod zero_address_tests {
     fn setup_contract(env: &Env) -> (Address, Address) {
         let contract = create_contract();
         let admin = Address::generate(env);
-        let contract_address = env.register_contract(None, contract);
+        let contract_address = env.register(CredenceBond, ());
 
         env.mock_all_auths();
 

@@ -1,8 +1,9 @@
 //! USDC token integration helpers for Credence Bond.
 //! Centralizes token configuration, allowance checks, and transfer operations.
+//! Rejects fee-on-transfer tokens where balance verification fails.
 
+use crate::safe_token::{self, token_client};
 use crate::DataKey;
-use soroban_sdk::token::TokenClient;
 use soroban_sdk::{Address, Env, String, Symbol};
 
 /// Stellar network passphrase label used for USDC mainnet references.
@@ -13,11 +14,6 @@ pub const STELLAR_TESTNET: &str = "testnet";
 
 fn network_key(e: &Env) -> Symbol {
     Symbol::new(e, "usdc_net")
-}
-
-fn token_client(e: &Env) -> TokenClient<'_> {
-    let token = get_token(e);
-    TokenClient::new(e, &token)
 }
 
 /// @notice Sets the token contract used by bond operations.
@@ -33,22 +29,12 @@ pub fn set_token(e: &Env, admin: &Address, token: &Address) {
         panic!("not admin");
     }
 
-    // Zero-address check
-    if token.to_string() == soroban_sdk::String::from_str(e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-        panic!("ZeroAddress");
-    }
-
     e.storage().instance().set(&DataKey::BondToken, token);
 }
 
 /// @notice Sets the USDC token contract and associated network label.
 /// @dev Network label is informational for auditing and can be "mainnet" or "testnet".
 pub fn set_usdc_token(e: &Env, admin: &Address, token: &Address, network: &String) {
-    // Zero-address check
-    if token.to_string() == soroban_sdk::String::from_str(e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-        panic!("ZeroAddress");
-    }
-
     if *network != String::from_str(e, STELLAR_MAINNET)
         && *network != String::from_str(e, STELLAR_TESTNET)
     {
@@ -77,23 +63,18 @@ pub fn get_usdc_network(e: &Env) -> Option<String> {
 }
 
 /// @notice Checks if owner has enough allowance for the contract to spend amount.
-/// @dev Uses token allowance(owner, spender) where spender is the bond contract.
+/// @dev Uses safe allowance checking with proper error handling.
 pub fn require_allowance(e: &Env, owner: &Address, amount: i128) {
-    if amount < 0 {
-        panic!("amount must be non-negative");
-    }
-    if amount == 0 {
-        return;
-    }
-    let contract = e.current_contract_address();
-    let allowance = token_client(e).allowance(owner, &contract);
-    if allowance < amount {
-        panic!("insufficient token allowance");
-    }
+    crate::safe_token::safe_require_allowance(e, owner, amount);
 }
 
 /// @notice Transfers tokens from owner into the bond contract.
 /// @dev Requires prior approval for the bond contract as spender.
+/// Detects and rejects fee-on-transfer tokens by verifying balance changes.
+/// @param e Environment reference
+/// @param owner Token owner address (must have approved the contract)
+/// @param amount Amount to transfer (must match actual amount received)
+/// @throws panic with UnsupportedToken error (code 213) if transfer amount differs
 pub fn transfer_into_contract(e: &Env, owner: &Address, amount: i128) {
     if amount < 0 {
         panic!("amount must be non-negative");
@@ -104,11 +85,33 @@ pub fn transfer_into_contract(e: &Env, owner: &Address, amount: i128) {
 
     require_allowance(e, owner, amount);
     let contract = e.current_contract_address();
-    token_client(e).transfer_from(&contract, owner, &contract, &amount);
+    let token = token_client(e);
+
+    // Check contract balance before transfer
+    let balance_before = token.balance(&contract);
+
+    // Perform transfer
+    token.transfer_from(&contract, owner, &contract, &amount);
+
+    // Verify balance increased by exactly the expected amount
+    // Rejects fee-on-transfer tokens where received < requested
+    let balance_after = token.balance(&contract);
+    let actual_received = balance_after
+        .checked_sub(balance_before)
+        .expect("balance underflow");
+
+    if actual_received != amount {
+        panic!("unsupported token: transfer amount mismatch (code 213)");
+    }
 }
 
 /// @notice Transfers tokens from the bond contract to recipient.
 /// @dev Used for standard withdrawals and penalty/treasury transfers.
+/// Detects and rejects fee-on-transfer tokens by verifying balance changes.
+/// @param e Environment reference
+/// @param recipient Recipient address
+/// @param amount Amount to transfer (must match actual amount sent)
+/// @throws panic with UnsupportedToken error (code 213) if transfer amount differs
 pub fn transfer_from_contract(e: &Env, recipient: &Address, amount: i128) {
     if amount < 0 {
         panic!("amount must be non-negative");
@@ -118,5 +121,26 @@ pub fn transfer_from_contract(e: &Env, recipient: &Address, amount: i128) {
     }
 
     let contract = e.current_contract_address();
-    token_client(e).transfer(&contract, recipient, &amount);
+    let token = token_client(e);
+
+    // Check contract balance before transfer
+    let balance_before = token.balance(&contract);
+
+    // Perform transfer
+    token.transfer(&contract, recipient, &amount);
+
+    // Verify balance decreased by exactly the expected amount
+    // Rejects fee-on-transfer tokens where sent != requested
+    let balance_after = token.balance(&contract);
+    let actual_sent = balance_before
+        .checked_sub(balance_after)
+        .expect("balance underflow");
+
+    if actual_sent != amount {
+        panic!("unsupported token: transfer amount mismatch (code 213)");
+    }
+}
+
+pub fn token_client(e: &Env) -> TokenClient<'_> {
+    TokenClient::new(e, &get_token(e))
 }
