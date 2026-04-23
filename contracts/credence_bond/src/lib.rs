@@ -6,7 +6,7 @@ use soroban_sdk::{
 
 pub mod access_control;
 mod batch;
-mod cooldown;
+mod claims;
 mod cooldown;
 pub mod early_exit_penalty;
 mod emergency;
@@ -20,9 +20,12 @@ pub mod liquidation_scanner;
 #[allow(dead_code)]
 mod math;
 mod nonce;
+#[allow(dead_code)]
+mod normalization;
 mod parameters;
 pub mod pausable;
 pub mod rolling_bond;
+mod safe_token;
 mod same_ledger_liquidation_guard;
 #[allow(dead_code)]
 mod slash_history;
@@ -124,9 +127,6 @@ pub enum DataKey {
     Token,
     GraceWindow, // FIX 1: added for configurable post-expiry grace window
     // Claims module storage keys
-    PendingClaims(Address),
-    ClaimableAmount(Address),
-    ClaimCounter,
     ClaimById(u64),
     // Upgrade authorization storage keys
     UpgradeAuth(Address),
@@ -679,7 +679,6 @@ impl CredenceBond {
             attestation_data: attestation_data.clone(),
             timestamp: e.ledger().timestamp(),
             weight,
-            attestation_data: attestation_data.clone(),
             revoked: false,
         };
         e.storage()
@@ -1838,11 +1837,6 @@ mod security;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
-mod test_liquidation_scanner;
-#[cfg(test)]
-mod test_zero_address_working;
-
-#[cfg(test)]
 mod test_access_control;
 #[cfg(test)]
 mod test_attestation;
@@ -1850,21 +1844,26 @@ mod test_attestation;
 mod test_attestation_types;
 #[cfg(test)]
 mod test_batch;
-
 #[cfg(test)]
-mod test_attestation;
+mod test_bps_denominator;
 #[cfg(test)]
-mod test_attestation_types;
-#[cfg(test)]
-mod test_batch;
+mod test_claim_pagination;
 #[cfg(test)]
 mod test_cooldown;
+#[cfg(test)]
+mod test_create_bond;
+#[cfg(test)]
+mod test_decimals;
+#[cfg(test)]
+mod test_duration_validation;
 #[cfg(test)]
 mod test_early_exit_penalty;
 #[cfg(test)]
 mod test_emergency;
 #[cfg(test)]
 mod test_events;
+#[cfg(test)]
+mod test_events_v2;
 #[cfg(test)]
 mod test_evidence;
 #[cfg(test)]
@@ -1876,7 +1875,15 @@ mod test_grace_period;
 #[cfg(test)]
 mod test_helpers;
 #[cfg(test)]
+mod test_immutable_config;
+#[cfg(test)]
+mod test_immutable_config_working;
+#[cfg(test)]
 mod test_increase_bond;
+#[cfg(test)]
+mod test_liquidation_scanner;
+#[cfg(test)]
+mod test_market_activation;
 #[cfg(test)]
 mod test_math;
 #[cfg(test)]
@@ -1911,6 +1918,9 @@ mod test_verifier;
 mod test_weighted_attestation;
 #[cfg(test)]
 mod test_withdraw_bond;
-// removed test_grace_window per checklist (file not present)
+#[cfg(test)]
+mod test_zero_address;
+#[cfg(test)]
+mod test_zero_address_working;
 #[cfg(test)]
 mod token_integration_test;
