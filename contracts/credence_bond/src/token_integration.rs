@@ -65,7 +65,7 @@ pub fn get_usdc_network(e: &Env) -> Option<String> {
 /// @notice Checks if owner has enough allowance for the contract to spend amount.
 /// @dev Uses safe allowance checking with proper error handling.
 pub fn require_allowance(e: &Env, owner: &Address, amount: i128) {
-    safe_token::safe_require_allowance(e, owner, amount);
+    crate::safe_token::safe_require_allowance(e, owner, amount);
 }
 
 /// @notice Transfers tokens from owner into the bond contract.
@@ -139,4 +139,8 @@ pub fn transfer_from_contract(e: &Env, recipient: &Address, amount: i128) {
     if actual_sent != amount {
         panic!("unsupported token: transfer amount mismatch (code 213)");
     }
+}
+
+pub fn token_client(e: &Env) -> TokenClient<'_> {
+    TokenClient::new(e, &get_token(e))
 }

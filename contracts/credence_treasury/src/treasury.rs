@@ -753,6 +753,7 @@ impl CredenceTreasury {
     /// Only callable by admin with strict access control.
     /// This function protects user-accounted balances from accidental extraction.
     pub fn rescue_native(e: Env, admin: Address, to: Address, amount: i128) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
 
         // Verify admin authorization

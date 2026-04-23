@@ -23,6 +23,8 @@ use errors::*;
 use types::{DataKey, FeeConfig, FixedBond, OracleSafety};
 use validation::validate_recipient;
 
+pub mod pausable;
+
 use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, Env, Symbol};
 
 #[cfg(test)]
@@ -30,6 +32,9 @@ mod test_helpers;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod test_pausable;
 
 /// Maximum fee in basis points (1000 = 10%).
 pub const MAX_FEE_BPS: u32 = 1000;
@@ -195,12 +200,21 @@ impl FixedDurationBond {
             panic!("{}", ERR_ALREADY_INITIALIZED);
         }
         e.storage().instance().set(&DataKey::Admin, &admin);
+        e.storage().instance().set(&DataKey::Paused, &false);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &0_u32);
+        e.storage().instance().set(&DataKey::PauseThreshold, &0_u32);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseProposalCounter, &0_u64);
         e.storage().instance().set(&DataKey::Token, &token);
     }
 
     /// Set (or update) the optional bond-creation fee.
     /// `fee_bps` = 0 effectively disables the fee.
     pub fn set_fee_config(e: Env, admin: Address, treasury: Address, fee_bps: u32) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         if fee_bps > MAX_FEE_BPS {
             panic!("{}", ERR_FEE_BPS_TOO_HIGH);
@@ -224,6 +238,7 @@ impl FixedDurationBond {
     /// Set the default early-exit penalty applied when `withdraw_early` is called.
     /// Pass 0 to disable early-exit withdrawal for newly created bonds.
     pub fn set_penalty_config(e: Env, admin: Address, base_penalty_bps: u32) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         e.storage()
             .instance()
@@ -242,6 +257,7 @@ impl FixedDurationBond {
         min_answer: i128,
         max_answer: i128,
     ) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         if min_answer <= 0 || max_answer < min_answer {
             panic!("{}", ERR_ORACLE_BOUNDS_INVALID);
@@ -261,6 +277,7 @@ impl FixedDurationBond {
 
     /// Enable or disable the receiver allowlist. Default is disabled.
     pub fn set_receiver_allowlist_enabled(e: Env, admin: Address, enabled: bool) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         e.storage()
             .instance()
@@ -272,6 +289,7 @@ impl FixedDurationBond {
     /// Allow a receiver address to receive protocol-controlled funds when the
     /// allowlist is enabled.
     pub fn allow_receiver(e: Env, admin: Address, receiver: Address) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         e.storage()
             .instance()
@@ -282,6 +300,7 @@ impl FixedDurationBond {
 
     /// Revoke an allowed receiver.
     pub fn revoke_receiver(e: Env, admin: Address, receiver: Address) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         e.storage()
             .instance()
@@ -293,6 +312,7 @@ impl FixedDurationBond {
     /// Collect all accrued creation fees to the admin or treasury.
     /// Transfers the fee balance to `recipient` and resets the counter.
     pub fn collect_fees(e: Env, admin: Address, recipient: Address) -> i128 {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         let accrued: i128 = e
             .storage()
@@ -373,6 +393,7 @@ impl FixedDurationBond {
     /// A creation fee (if configured) is deducted from `amount`; the remaining
     /// principal is stored as `FixedBond.amount`.
     pub fn create_bond(e: Env, owner: Address, amount: i128, duration_secs: u64) -> FixedBond {
+        pausable::require_not_paused(&e);
         owner.require_auth();
 
         if amount <= 0 {
@@ -479,6 +500,7 @@ impl FixedDurationBond {
     /// Panics if there is no active bond or the lock period has not yet elapsed.
     /// Deactivates the bond after successful transfer.
     pub fn withdraw(e: Env, owner: Address) -> FixedBond {
+        pausable::require_not_paused(&e);
         owner.require_auth();
 
         let mut bond: FixedBond = e
@@ -537,6 +559,7 @@ impl FixedDurationBond {
     /// Net amount = `bond.amount - penalty`. Penalty goes to the configured
     /// treasury; if no fee config is set, the penalty is burned (not transferred).
     pub fn withdraw_early(e: Env, owner: Address) -> FixedBond {
+        pausable::require_not_paused(&e);
         owner.require_auth();
 
         let mut bond: FixedBond = e
@@ -629,6 +652,34 @@ impl FixedDurationBond {
             .get(&DataKey::Bond(owner))
             .unwrap_or_else(|| panic!("{}", ERR_NO_BOND));
         e.ledger().timestamp() >= bond.bond_expiry
+    }
+
+    pub fn pause(e: Env, caller: Address) -> Option<u64> {
+        pausable::pause(&e, &caller)
+    }
+
+    pub fn unpause(e: Env, caller: Address) -> Option<u64> {
+        pausable::unpause(&e, &caller)
+    }
+
+    pub fn is_paused(e: Env) -> bool {
+        pausable::is_paused(&e)
+    }
+
+    pub fn set_pause_signer(e: Env, admin: Address, signer: Address, enabled: bool) {
+        pausable::set_pause_signer(&e, &admin, &signer, enabled)
+    }
+
+    pub fn set_pause_threshold(e: Env, admin: Address, threshold: u32) {
+        pausable::set_pause_threshold(&e, &admin, threshold)
+    }
+
+    pub fn approve_pause_proposal(e: Env, signer: Address, proposal_id: u64) {
+        pausable::approve_pause_proposal(&e, &signer, proposal_id)
+    }
+
+    pub fn execute_pause_proposal(e: Env, proposal_id: u64) {
+        pausable::execute_pause_proposal(&e, proposal_id)
     }
 
     /// Returns the number of seconds remaining until maturity.
