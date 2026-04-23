@@ -51,7 +51,7 @@ pub struct UpgradeProposal {
     /// New implementation address
     pub new_implementation: Address,
     /// Additional data for the upgrade
-    pub upgrade_data: Vec<u8>,
+    pub upgrade_data: Vec<i128>,
     /// When the proposal was created
     pub created_at: u64,
     /// Current status of the proposal
@@ -99,7 +99,7 @@ pub enum UpgradeError {
 /// Storage keys for upgrade authorization
 impl DataKey {
     /// Upgrade authorization by address: DataKey::UpgradeAuth(address) -> UpgradeAuthorization
-    pub const fn upgrade_auth(address: &Address) -> DataKey {
+    pub fn upgrade_auth(address: &Address) -> DataKey {
         DataKey::UpgradeAuth(address.clone())
     }
 
@@ -304,7 +304,7 @@ pub fn revoke_upgrade_auth(e: &Env, admin: &Address, address: &Address) {
         let mut new_upgraders = Vec::new(e);
         for i in 0..upgraders.len() {
             let upgrader = upgraders.get(i).unwrap();
-            if upgrader != address {
+            if upgrader != *address {
                 new_upgraders.push_back(upgrader);
             }
         }
@@ -423,7 +423,7 @@ pub fn propose_upgrade(
     e: &Env,
     proposer: &Address,
     new_implementation: &Address,
-    upgrade_data: Vec<u8>,
+    upgrade_data: Vec<i128>,
     required_approvals: u32,
 ) -> u64 {
     proposer.require_auth();
@@ -508,7 +508,7 @@ pub fn approve_upgrade_proposal(e: &Env, approver: &Address, proposal_id: u64) {
 
     // Check if already approved
     for i in 0..proposal.approvals.len() {
-        if proposal.approvals.get(i).unwrap() == approver {
+        if proposal.approvals.get(i).unwrap() == *approver {
             panic!("already approved");
         }
     }

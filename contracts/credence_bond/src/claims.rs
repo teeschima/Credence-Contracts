@@ -72,12 +72,12 @@ pub struct ClaimResult {
 /// Storage keys for claims
 impl DataKey {
     /// Pending claims for a user: DataKey::PendingClaims(user) -> Vec<PendingClaim>
-    pub const fn pending_claims(user: &Address) -> DataKey {
+    pub fn pending_claims(user: &Address) -> DataKey {
         DataKey::PendingClaims(user.clone())
     }
 
     /// Total claimable amount for a user: DataKey::ClaimableAmount(user) -> i128
-    pub const fn claimable_amount(user: &Address) -> DataKey {
+    pub fn claimable_amount(user: &Address) -> DataKey {
         DataKey::ClaimableAmount(user.clone())
     }
 
@@ -569,7 +569,8 @@ pub fn process_claim_by_id(e: &Env, user: &Address, claim_id: u64) -> ClaimResul
     };
 
     // Emit events
-    let processed_claims = Vec::from_array(e, [&claim]);
+    let mut processed_claims = Vec::new(e);
+    processed_claims.push_back(claim);
     events::emit_claims_processed(e, user, &result, &processed_claims);
 
     result
@@ -599,7 +600,7 @@ pub fn get_pending_claims_paginated(
     let end = (start + actual_limit).min(all_claims.len() as u32);
 
     for i in start..end {
-        result.push_back(all_claims.get(i as usize).unwrap());
+        result.push_back(all_claims.get((i as u32).try_into().unwrap()).unwrap());
     }
 
     result
@@ -663,12 +664,12 @@ pub fn process_claims_paginated(
     let mut processed_count = 0u32;
 
     // Process claims starting from offset
-    for i in offset as usize..all_claims.len() {
+    for i in offset..all_claims.len() {
         if processed_count >= actual_limit {
             break;
         }
 
-        let claim = all_claims.get(i).unwrap();
+        let claim = all_claims.get(i.try_into().unwrap()).unwrap();
 
         // Skip expired claims
         if claim.expires_at > 0 && now > claim.expires_at {
