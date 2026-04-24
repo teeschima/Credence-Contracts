@@ -33,6 +33,8 @@ cargo test -p credence_bond
 cargo test -p credence_delegation
 ```
 
+See [docs/testing.md](docs/testing.md) for coverage instructions (95% target, `cargo-llvm-cov`).
+
 ## Project layout
 
 - `contracts/credence_bond/` — Identity bond contract
