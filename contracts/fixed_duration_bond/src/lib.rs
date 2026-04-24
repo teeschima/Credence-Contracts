@@ -351,7 +351,20 @@ impl FixedDurationBond {
             .instance()
             .get(&DataKey::OracleSafety(asset.clone()))
             .unwrap_or_else(|| panic!("{}", ERR_ORACLE_SAFETY_NOT_SET));
+        
         validate_oracle_answer(oracle_answer, &safety);
+
+        let max_staleness = get_max_staleness(&e, &asset);
+        let now = e.ledger().timestamp();
+        validate_oracle(
+            oracle_answer,
+            updated_at,
+            round_id,
+            answered_in_round,
+            max_staleness,
+            now,
+        );
+
         mul_i128(amount, oracle_answer, ERR_VALUATION_OVERFLOW)
     }
 

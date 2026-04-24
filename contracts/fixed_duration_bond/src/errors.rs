@@ -26,5 +26,5 @@ pub const ERR_VALUATION_OVERFLOW: &str = "valuation overflow";
 pub const ERR_UNSUPPORTED_TOKEN: &str = "unsupported token: transfer amount mismatch (code 213)";
 pub const ERR_UNAUTHORIZED_RECEIVER: &str = "unauthorized receiver";
 pub const ERR_ORACLE_INVALID_ANSWER: &str = "oracle invalid answer";
-pub const ERR_ORACLE_INCOMPLETE_ROUND: &str = "oracle incomplete round";
-pub const ERR_ORACLE_STALE: &str = "oracle answer is stale";
+pub const ERR_ORACLE_INCOMPLETE_ROUND: &str = "oracle: incomplete round";
+pub const ERR_ORACLE_STALE: &str = "oracle: stale answer";
