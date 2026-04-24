@@ -540,6 +540,46 @@ pub fn set_max_leverage(e: &Env, admin: &Address, value: u32) {
 }
 
 // ============================================================================
+// Borrow Freeze (Governance-Controlled)
+// ============================================================================
+
+/// Returns `true` when new borrows/increases are frozen.
+#[must_use]
+pub fn is_borrow_frozen(e: &Env) -> bool {
+    e.storage()
+        .instance()
+        .get(&crate::DataKey::BorrowFrozen)
+        .unwrap_or(false)
+}
+
+/// Panics with `BorrowFrozen` if borrows are currently frozen.
+pub fn require_not_borrow_frozen(e: &Env) {
+    if is_borrow_frozen(e) {
+        panic!("borrow frozen");
+    }
+}
+
+/// Freeze or unfreeze new bond creation and top-ups. Governance-only.
+///
+/// Repayments and withdrawals are unaffected.
+///
+/// # Events
+/// Emits `borrow_freeze_set(frozen, admin, timestamp)`.
+pub fn set_borrow_frozen(e: &Env, admin: &Address, frozen: bool) {
+    validate_admin(e, admin);
+    admin.require_auth();
+    let old = is_borrow_frozen(e);
+    e.storage()
+        .instance()
+        .set(&crate::DataKey::BorrowFrozen, &frozen);
+    let timestamp = e.ledger().timestamp();
+    e.events().publish(
+        (Symbol::new(e, "borrow_freeze_set"),),
+        (old, frozen, admin.clone(), timestamp),
+    );
+}
+
+// ============================================================================
 // Internal Helpers
 // ============================================================================
 

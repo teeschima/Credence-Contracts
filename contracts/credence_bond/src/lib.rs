@@ -136,6 +136,8 @@ pub enum DataKey {
     SupplyCap,
     TotalSupply,
     LastCollateralIncreaseLedger,
+    // Borrow freeze
+    BorrowFrozen,
 }
 
 #[contract]
@@ -490,6 +492,7 @@ impl CredenceBond {
 
     pub fn create_bond(e: Env, identity: Address, amount: i128, duration: u64) -> IdentityBond {
         pausable::require_not_paused(&e);
+        parameters::require_not_borrow_frozen(&e);
         validation::validate_bond_amount(amount);
         validation::validate_bond_duration(duration);
         leverage::validate_leverage(amount, parameters::get_max_leverage(&e));
@@ -516,6 +519,7 @@ impl CredenceBond {
         validation::validate_bond_duration(duration);
 
         pausable::require_not_paused(&e);
+        parameters::require_not_borrow_frozen(&e);
         identity.require_auth();
         token_integration::transfer_into_contract(&e, &identity, amount);
         let bond_start = e.ledger().timestamp();
@@ -1303,6 +1307,7 @@ impl CredenceBond {
 
     pub fn top_up(e: Env, amount: i128) -> IdentityBond {
         pausable::require_not_paused(&e);
+        parameters::require_not_borrow_frozen(&e);
         if amount <= 0 {
             panic!("amount must be positive");
         }
@@ -1470,6 +1475,18 @@ impl CredenceBond {
         pausable::require_not_paused(&e);
         admin.require_auth();
         parameters::set_max_leverage(&e, &admin, value)
+    }
+
+    /// Returns whether new bond creation and top-ups are currently frozen.
+    pub fn is_borrow_frozen(e: Env) -> bool {
+        parameters::is_borrow_frozen(&e)
+    }
+
+    /// Freeze or unfreeze new bond creation and top-ups. Governance (admin) only.
+    /// Repayments and withdrawals are unaffected.
+    pub fn set_borrow_frozen(e: Env, admin: Address, frozen: bool) {
+        pausable::require_not_paused(&e);
+        parameters::set_borrow_frozen(&e, &admin, frozen)
     }
 
     pub fn withdraw_bond_full(e: Env, identity: Address) -> i128 {
@@ -2030,6 +2047,8 @@ mod test_validation;
 mod test_verifier;
 #[cfg(test)]
 mod test_weighted_attestation;
+#[cfg(test)]
+mod test_borrow_freeze;
 #[cfg(test)]
 mod test_withdraw_bond;
 #[cfg(test)]
