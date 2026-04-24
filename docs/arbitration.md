@@ -61,3 +61,7 @@ Returns the current total weight for a specific outcome.
 - Double-voting prevention.
 - Time-bound voting periods.
 - Overflow protection for weight tallies and counters.
+
+## Known Simplifications
+
+Arbitrator voting weights are admin-assigned integers, not backed by on-chain stake. See [known-simplifications.md](known-simplifications.md#9-arbitration-voting-weights-are-not-stake-backed) for details and the production path.

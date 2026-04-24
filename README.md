@@ -45,10 +45,7 @@ cargo test -p credence_delegation
 - `contracts/credence_delegation/` — Delegation contract
 - `docs/` — Feature docs (`rolling-bonds.md`, `early-exit.md`, `slashing.md`, `tier-system.md`, `delegation.md`, `emergency.md`)
 
-Known simplifications:
-
-- Token transfer (USDC) is stubbed in this reference implementation.
-- Bond storage is currently single-bond-per-contract instance, not per-identity map.
+**Known simplifications:** See [docs/known-simplifications.md](docs/known-simplifications.md) for a complete list of intentional limitations and production paths.
 
 ## Deploy (Soroban CLI)
 

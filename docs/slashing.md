@@ -377,3 +377,7 @@ contract.withdraw(300);
 - [Contract Tests](../contracts/credence_bond/src/test_slashing.rs)
 - [Slashing Module](../contracts/credence_bond/src/slashing.rs)
 
+
+## Known Simplifications
+
+Slashed funds are not transferred to the treasury in this reference implementation. See [known-simplifications.md](known-simplifications.md#5-slashed-funds-are-not-transferred-to-treasury) for details and the production path.
