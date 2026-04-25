@@ -15,7 +15,7 @@
 //! - **Over-slash Protection**: Ensures slashed_amount never exceeds bonded_amount
 //! - **Withdrawals**: Affected by slashing (withdrawable = bonded - slashed)
 
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{Address, Env, String, Symbol};
 
 /// Storage key for tracking accumulated slashed funds (for treasury transfer purposes).
 /// Not currently used for fund transfers in this implementation, but reserved for future use.
@@ -160,8 +160,8 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
         actual_slash_amount, 
         bond.slashed_amount, 
         e.ledger().timestamp(), 
-        admin, 
-        "Slashed by admin".to_string(), 
+         admin, 
+        String::from_str(e, "Slashed by admin"),
         bond.slashed_amount >= bond.bonded_amount
     );
 

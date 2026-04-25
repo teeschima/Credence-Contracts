@@ -2,9 +2,7 @@
 //! Centralizes token configuration, allowance checks, and transfer operations.
 //! Rejects fee-on-transfer tokens where balance verification fails.
 
-use crate::DataKey;
-use crate::validation::validate_recipient;
-use soroban_sdk::token::TokenClient;
+use crate::safe_token;
 use soroban_sdk::{Address, Env, String, Symbol};
 
 /// Stellar network passphrase label used for USDC mainnet references.
@@ -17,33 +15,34 @@ fn network_key(e: &Env) -> Symbol {
     Symbol::new(e, "usdc_net")
 }
 
-
 /// @notice Sets the token contract used by bond operations.
 /// @dev Requires admin auth and stores token in instance storage.
 pub fn set_token(e: &Env, admin: &Address, token: &Address) {
     let stored_admin: Address = e
         .storage()
         .instance()
-        .get(&DataKey::Admin)
+        .get(&crate::DataKey::Admin)
         .unwrap_or_else(|| panic!("not initialized"));
     admin.require_auth();
     if *admin != stored_admin {
         panic!("not admin");
     }
 
-    // Zero-address check
-    if token.to_string().to_string() == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" {
+    // Zero-address check using soroban_sdk::String comparison
+    let zero_addr_str = String::from_str(e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    if token.to_string() == zero_addr_str {
         panic!("ZeroAddress");
     }
 
-    e.storage().instance().set(&DataKey::BondToken, token);
+    e.storage().instance().set(&crate::DataKey::BondToken, token);
 }
 
 /// @notice Sets the USDC token contract and associated network label.
 /// @dev Network label is informational for auditing and can be "mainnet" or "testnet".
 pub fn set_usdc_token(e: &Env, admin: &Address, token: &Address, network: &String) {
     // Zero-address check
-    if token.to_string().to_string() == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" {
+    let zero_addr_str = String::from_str(e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    if token.to_string() == zero_addr_str {
         panic!("ZeroAddress");
     }
 
@@ -65,7 +64,7 @@ pub fn set_usdc_token(e: &Env, admin: &Address, token: &Address, network: &Strin
 pub fn get_token(e: &Env) -> Address {
     e.storage()
         .instance()
-        .get(&DataKey::BondToken)
+        .get(&crate::DataKey::BondToken)
         .unwrap_or_else(|| panic!("token not configured - contract not properly initialized"))
 }
 
@@ -97,13 +96,13 @@ pub fn transfer_into_contract(e: &Env, owner: &Address, amount: i128) {
 
     require_allowance(e, owner, amount);
     let contract = e.current_contract_address();
-    let token = token_client(e);
+    let token = safe_token::token_client(e);
 
     // Check contract balance before transfer
     let balance_before = token.balance(&contract);
 
-    // Perform transfer
-    token.transfer_from(&contract, owner, &contract, &amount);
+    // Perform transfer using safe_token
+    safe_token::safe_transfer_from(e, owner, amount);
 
     // Verify balance increased by exactly the expected amount
     // Rejects fee-on-transfer tokens where received < requested
@@ -132,13 +131,13 @@ pub fn transfer_from_contract(e: &Env, recipient: &Address, amount: i128) {
     }
 
     let contract = e.current_contract_address();
-    let token = token_client(e);
+    let token = safe_token::token_client(e);
 
     // Check contract balance before transfer
     let balance_before = token.balance(&contract);
 
-    // Perform transfer
-    token.transfer(&contract, recipient, &amount);
+    // Perform transfer using safe_token
+    safe_token::safe_transfer(e, recipient, amount);
 
     // Verify balance decreased by exactly the expected amount
     // Rejects fee-on-transfer tokens where sent != requested

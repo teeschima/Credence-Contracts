@@ -59,7 +59,7 @@ fn authorized_attester_can_add_attestation() {
     let nonce = client.get_nonce(&attacker);
     let att = client.add_attestation(&attacker, &user, &valid, &contract_id, &deadline, &nonce);
 
-    assert_eq!(att.identity, user);
+    assert_eq!(att.subject, user);
 }
 
 #[test]

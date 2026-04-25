@@ -34,7 +34,8 @@ pub mod upgrade_auth;
 mod validation;
 pub mod verifier;
 mod weighted_attestation;
-mod cooldown;
+mod claims;
+mod safe_token;
 
 use crate::access_control::{
     add_verifier_role, is_verifier, remove_verifier_role, require_verifier,
@@ -122,12 +123,8 @@ pub enum DataKey {
     ClaimCounter,
     BondToken,
     Token,
-    GraceWindow, // FIX 1: added for configurable post-expiry grace window
-    // Claims module storage keys
-    PendingClaims(Address),
-    ClaimableAmount(Address),
-    ClaimCounter,
     ClaimById(u64),
+    GraceWindow, // FIX 1: added for configurable post-expiry grace window
     // Upgrade authorization storage keys
     UpgradeAuth(Address),
     AuthorizedUpgraders,
@@ -139,6 +136,7 @@ pub enum DataKey {
     // Supply cap enforcement storage keys
     SupplyCap,
     TotalSupply,
+    LastCollateralIncreaseLedger,
 }
 
 #[contract]
@@ -660,7 +658,6 @@ impl CredenceBond {
             id,
             attester: attester.clone(),
             subject: subject.clone(),
-            attestation_data: attestation_data.clone(),
             timestamp: e.ledger().timestamp(),
             weight,
             attestation_data: attestation_data.clone(),
@@ -854,10 +851,11 @@ impl CredenceBond {
         // 9. Validate emergency configuration if enabled
         let emergency_config = emergency::get_config(e);
         if emergency_config.enabled {
-            if emergency_config.governance.is_none() {
+            let zero = soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+            if emergency_config.governance.to_string() == zero {
                 panic!("emergency mode enabled but governance not configured - cannot activate bond");
             }
-            if emergency_config.treasury.is_none() {
+            if emergency_config.treasury.to_string() == zero {
                 panic!("emergency mode enabled but treasury not configured - cannot activate bond");
             }
             if emergency_config.emergency_fee_bps > 10000 {
@@ -1253,34 +1251,9 @@ impl CredenceBond {
         governance_approval::get_quorum_config(&e)
     }
 
-    pub fn top_up(e: Env, amount: i128) -> IdentityBond {
-        if amount <= 0 {
-            panic!("amount must be positive");
-        }
-
-        let key = DataKey::Bond;
-        let mut bond: IdentityBond = e
-}
-
-pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
-    let key = DataKey::Bond;
-    let mut bond = e
-        .storage()
-        .instance()
-        .get::<_, IdentityBond>(&key)
-        .unwrap_or_else(|| panic!("no bond"));
-    bond.identity.require_auth();
-    bond.bond_duration = bond
-        .bond_duration
-        .checked_add(additional_duration)
-        .expect("duration overflow");
-    let _end = bond
-        .bond_start
-        .checked_add(bond.bond_duration)
-        .expect("bond end overflow");
-    e.storage().instance().set(&key, &bond);
-    bond
-}
+    // lets people top up their bond with more tokens
+    // pulls tokens from the caller and bumps their bonded amount
+    pub fn top_up(e: Env, caller: Address, amount: i128) -> IdentityBond {
         caller.require_auth();
         if amount <= 0 {
             panic!("amount must be positive");
@@ -1295,19 +1268,14 @@ pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
             if bond.identity != caller {
                 panic!("not bond owner");
             }
-            let token_addr: Address = e
-                .storage()
-                .instance()
-                .get(&DataKey::BondToken)
-                .unwrap_or_else(|| panic!("bond token not configured"));
             let old_amount = bond.bonded_amount;
             let new_amount = old_amount
                 .checked_add(amount)
                 .expect("bond increase caused overflow");
-            
-            // Use safe token operations
+
+            // pull the tokens first, then update state
             crate::safe_token::safe_transfer_from(&e, &caller, amount);
-            
+
             let old_tier = tiered_bond::get_tier_for_amount(old_amount);
             let new_tier = tiered_bond::get_tier_for_amount(new_amount);
             bond.bonded_amount = new_amount;
@@ -1322,6 +1290,7 @@ pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
         })
     }
 
+    // push the bond end date further out
     pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
         let key = DataKey::Bond;
         let mut bond = e
