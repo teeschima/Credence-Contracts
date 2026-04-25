@@ -45,7 +45,7 @@ fn validate_amount(amount: i128) {
 /// Gets the configured token address with validation
 pub fn get_token(e: &Env) -> Address {
     let token = crate::token_integration::get_token(e);
-    validate_token_address(e, &token);
+    validate_token_address(&token);
     token
 }
 
@@ -209,9 +209,7 @@ pub fn force_approve(e: &Env, spender: &Address, amount: i128) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{
-        testutils::Address as TestAddress, testutils::Ledger as TestLedger, Address, Env,
-    };
+    use soroban_sdk::{testutils::Address as TestAddress, Address, Env};
 
     #[test]
     fn test_validate_amount() {
