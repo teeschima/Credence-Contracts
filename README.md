@@ -33,6 +33,17 @@ cargo test -p credence_bond
 cargo test -p credence_delegation
 ```
 
+## Linting
+
+Run the contracts-only formatting and lint checks locally before opening a PR:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
+The dedicated CI workflow at `.github/workflows/contracts-lints.yml` runs the same checks.
+
 ## Project layout
 
 - `contracts/credence_bond/` — Identity bond contract
