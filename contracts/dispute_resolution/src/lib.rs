@@ -22,6 +22,8 @@ use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, Address, Env,
 };
 
+pub mod pausable;
+
 // ─── TTL constants ────────────────────────────────────────────────────────────
 
 /// Minimum ledger sequence TTL before a bump is requested (~1 day at 5 s/ledger).
@@ -39,12 +41,22 @@ const BUMP_TARGET: u32 = 518_400;
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
+    /// Contract administrator.
+    Admin,
     /// Global monotonically increasing dispute counter. Stored in `instance()`.
     DisputeCounter,
     /// Full dispute record keyed by its ID. Stored in `persistent()`.
     Dispute(u64),
     /// Boolean vote record keyed by (dispute_id, arbitrator). Stored in `persistent()`.
     Vote(u64, Address),
+    Paused,
+    PauseSigner(Address),
+    PauseSignerCount,
+    PauseThreshold,
+    PauseProposalCounter,
+    PauseProposal(u64),
+    PauseApproval(u64, Address),
+    PauseApprovalCount(u64),
 }
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
@@ -150,6 +162,23 @@ pub struct DisputeContract;
 
 #[contractimpl]
 impl DisputeContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("already initialized");
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &0_u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseThreshold, &0_u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseProposalCounter, &0_u64);
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     /// Read a `Dispute` from `persistent()` storage, bump its TTL, and return
@@ -192,6 +221,7 @@ impl DisputeContract {
         token: Address,
         resolution_deadline: u64,
     ) -> Result<u64, Error> {
+        pausable::require_not_paused(&env);
         disputer.require_auth();
 
         if stake < MIN_STAKE {
@@ -284,6 +314,7 @@ impl DisputeContract {
         dispute_id: u64,
         favor_disputer: bool,
     ) -> Result<(), Error> {
+        pausable::require_not_paused(&env);
         arbitrator.require_auth();
 
         // Single persistent-storage read: load-or-error (replaces has() + get()).
@@ -338,6 +369,7 @@ impl DisputeContract {
     /// * `DisputeNotOpen` — dispute is already resolved/expired
     /// * `DeadlineNotReached` — voting period is still active
     pub fn resolve_dispute(env: Env, dispute_id: u64) -> Result<(), Error> {
+        pausable::require_not_paused(&env);
         let mut dispute = Self::load_dispute(&env, dispute_id)?;
 
         if dispute.status != DisputeStatus::Open {
@@ -354,9 +386,9 @@ impl DisputeContract {
         let outcome = if dispute.votes_for_disputer > dispute.votes_for_slasher {
             // Verify balance delta when returning stake to disputer
             let balance_before = token_client.balance(&contract_address);
-            
+
             token_client.transfer(&contract_address, &dispute.disputer, &dispute.stake);
-            
+
             // Verify balance decreased by exactly the expected amount
             let balance_after = token_client.balance(&contract_address);
             let actual_sent = balance_before
@@ -396,6 +428,7 @@ impl DisputeContract {
     /// * `DisputeNotOpen` — dispute is already resolved/expired
     /// * `DeadlineNotReached` — deadline has not yet passed
     pub fn expire_dispute(env: Env, dispute_id: u64) -> Result<(), Error> {
+        pausable::require_not_paused(&env);
         let mut dispute = Self::load_dispute(&env, dispute_id)?;
 
         if dispute.status != DisputeStatus::Open {
@@ -434,9 +467,39 @@ impl DisputeContract {
             .get(&DataKey::DisputeCounter)
             .unwrap_or(0)
     }
+
+    pub fn pause(e: Env, caller: Address) -> Option<u64> {
+        pausable::pause(&e, &caller)
+    }
+
+    pub fn unpause(e: Env, caller: Address) -> Option<u64> {
+        pausable::unpause(&e, &caller)
+    }
+
+    pub fn is_paused(e: Env) -> bool {
+        pausable::is_paused(&e)
+    }
+
+    pub fn set_pause_signer(e: Env, admin: Address, signer: Address, enabled: bool) {
+        pausable::set_pause_signer(&e, &admin, &signer, enabled)
+    }
+
+    pub fn set_pause_threshold(e: Env, admin: Address, threshold: u32) {
+        pausable::set_pause_threshold(&e, &admin, threshold)
+    }
+
+    pub fn approve_pause_proposal(e: Env, signer: Address, proposal_id: u64) {
+        pausable::approve_pause_proposal(&e, &signer, proposal_id)
+    }
+
+    pub fn execute_pause_proposal(e: Env, proposal_id: u64) {
+        pausable::execute_pause_proposal(&e, proposal_id)
+    }
 }
 
 #[cfg(test)]
 mod test;
 #[cfg(test)]
 mod test_gas;
+#[cfg(test)]
+mod test_pausable;

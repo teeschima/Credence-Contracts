@@ -3,7 +3,7 @@ use soroban_sdk::{Address, Env, String, Symbol};
 /// Emitted when a new bond is created.
 ///
 /// # Topics (Indexed)
-/// * `Symbol` - "bond_created_v2" 
+/// * `Symbol` - "bond_created_v2"
 /// * `Address` - The identity owning the bond
 /// * `i128` - The initial bonded amount (indexed for amount-based queries)
 /// * `u64` - The bond start timestamp (indexed for time-based queries)
@@ -21,12 +21,14 @@ pub fn emit_bond_created_v2(
     start_timestamp: u64,
 ) {
     let topics = (
-        Symbol::new(e, "bond_created_v2"), 
+        Symbol::new(e, "bond_created_v2"),
         identity.clone(),
         amount,
         start_timestamp,
     );
-    let end_timestamp = start_timestamp.checked_add(duration).expect("timestamp overflow");
+    let end_timestamp = start_timestamp
+        .checked_add(duration)
+        .expect("timestamp overflow");
     let data = (duration, is_rolling, end_timestamp);
     e.events().publish(topics, data);
 }
@@ -41,7 +43,7 @@ pub fn emit_bond_created_v2(
 /// * `i128` - The initial bonded amount
 /// * `u64` - The duration of the bond in seconds
 /// * `bool` - Whether the bond is rolling
-/// 
+///
 /// @deprecated Use emit_bond_created_v2 for better indexing
 pub fn emit_bond_created(
     e: &Env,
@@ -67,6 +69,7 @@ pub fn emit_bond_created(
 /// # Data
 /// * `bool` - Whether this increase crossed a tier threshold
 /// * `crate::BondTier` - New bond tier after increase
+#[allow(dead_code)]
 pub fn emit_bond_increased_v2(
     e: &Env,
     identity: &Address,
@@ -77,7 +80,7 @@ pub fn emit_bond_increased_v2(
     new_tier: crate::BondTier,
 ) {
     let topics = (
-        Symbol::new(e, "bond_increased_v2"), 
+        Symbol::new(e, "bond_increased_v2"),
         identity.clone(),
         added_amount,
         new_total,
@@ -96,8 +99,9 @@ pub fn emit_bond_increased_v2(
 /// # Data
 /// * `i128` - The additional amount added
 /// * `i128` - The new total bonded amount
-/// 
+///
 /// @deprecated Use emit_bond_increased_v2 for better indexing
+#[allow(dead_code)]
 pub fn emit_bond_increased(e: &Env, identity: &Address, added_amount: i128, new_total: i128) {
     let topics = (Symbol::new(e, "bond_increased"), identity.clone());
     let data = (added_amount, new_total);
@@ -126,7 +130,7 @@ pub fn emit_bond_withdrawn_v2(
     penalty_amount: i128,
 ) {
     let topics = (
-        Symbol::new(e, "bond_withdrawn_v2"), 
+        Symbol::new(e, "bond_withdrawn_v2"),
         identity.clone(),
         amount_withdrawn,
         remaining,
@@ -145,7 +149,7 @@ pub fn emit_bond_withdrawn_v2(
 /// # Data
 /// * `i128` - The amount withdrawn
 /// * `i128` - The remaining bonded amount
-/// 
+///
 /// @deprecated Use emit_bond_withdrawn_v2 for better indexing
 pub fn emit_bond_withdrawn(e: &Env, identity: &Address, amount_withdrawn: i128, remaining: i128) {
     let topics = (Symbol::new(e, "bond_withdrawn"), identity.clone());
@@ -177,7 +181,7 @@ pub fn emit_bond_slashed_v2(
     is_full_slash: bool,
 ) {
     let topics = (
-        Symbol::new(e, "bond_slashed_v2"), 
+        Symbol::new(e, "bond_slashed_v2"),
         identity.clone(),
         slash_amount,
         total_slashed,
@@ -197,8 +201,9 @@ pub fn emit_bond_slashed_v2(
 /// # Data
 /// * `i128` - The amount slashed in this event
 /// * `i128` - The new total slashed amount for this bond
-/// 
+///
 /// @deprecated Use emit_bond_slashed_v2 for better indexing
+#[allow(dead_code)]
 pub fn emit_bond_slashed(e: &Env, identity: &Address, slash_amount: i128, total_slashed: i128) {
     let topics = (Symbol::new(e, "bond_slashed"), identity.clone());
     let data = (slash_amount, total_slashed);
@@ -261,55 +266,82 @@ pub fn emit_claims_expired(e: &Env, user: &Address, expired_count: u32, expired_
     e.events().publish(topics, data);
 }
 
+/// Emitted when upgrade authorization is initialized.
 pub fn emit_upgrade_auth_initialized(e: &Env, admin: &Address) {
-    e.events()
-        .publish((Symbol::new(e, "upgrade_auth_init"),), admin.clone());
+    let topics = (Symbol::new(e, "upgrade_auth_init"), admin.clone());
+    e.events().publish(topics, ());
 }
 
+/// Emitted when upgrade authorization is granted.
 pub fn emit_upgrade_auth_granted(
     e: &Env,
     admin: &Address,
     address: &Address,
     role: crate::upgrade_auth::UpgradeRole,
 ) {
-    e.events().publish(
-        (Symbol::new(e, "upgrade_auth_granted"), admin.clone()),
-        (address.clone(), role),
-    );
+    let topics = (Symbol::new(e, "upgrade_auth_granted"), admin.clone());
+    let data = (address.clone(), role);
+    e.events().publish(topics, data);
 }
 
+/// Emitted when upgrade authorization is revoked.
 pub fn emit_upgrade_auth_revoked(e: &Env, admin: &Address, address: &Address) {
-    e.events().publish(
-        (Symbol::new(e, "upgrade_auth_revoked"), admin.clone()),
-        address.clone(),
-    );
+    let topics = (Symbol::new(e, "upgrade_auth_revoked"), admin.clone());
+    let data = address.clone();
+    e.events().publish(topics, data);
 }
 
+/// Emitted when an upgrade is proposed.
 pub fn emit_upgrade_proposed(
     e: &Env,
     proposer: &Address,
     proposal_id: u64,
     new_implementation: &Address,
 ) {
-    e.events().publish(
-        (Symbol::new(e, "upgrade_proposed"), proposal_id, proposer.clone()),
-        new_implementation.clone(),
-    );
+    let topics = (Symbol::new(e, "upgrade_proposed"), proposer.clone());
+    let data = (proposal_id, new_implementation.clone());
+    e.events().publish(topics, data);
 }
 
+/// Emitted when an upgrade proposal is approved.
 pub fn emit_upgrade_approved(e: &Env, approver: &Address, proposal_id: u64) {
-    e.events()
-        .publish((Symbol::new(e, "upgrade_approved"), proposal_id), approver.clone());
+    let topics = (Symbol::new(e, "upgrade_approved"), approver.clone());
+    let data = proposal_id;
+    e.events().publish(topics, data);
 }
 
+/// Emitted when an upgrade is executed.
 pub fn emit_upgrade_executed(
     e: &Env,
     executor: &Address,
     new_implementation: &Address,
     proposal_id: Option<u64>,
 ) {
-    e.events().publish(
-        (Symbol::new(e, "upgrade_executed"), proposal_id),
-        (executor.clone(), new_implementation.clone()),
-    );
+    let topics = (Symbol::new(e, "upgrade_executed"), executor.clone());
+    let data = (new_implementation.clone(), proposal_id);
+    e.events().publish(topics, data);
+}
+
+
+/// Emitted when a protocol parameter is updated.
+/// 
+/// # Topics (Indexed)
+/// * `Symbol` - "param_updated"
+/// * `Symbol` - Parameter Key (e.g., "leverage")
+/// * `Symbol` - Category (e.g., "risk")
+/// * `Address` - Admin who performed the update
+///
+/// # Data
+/// * `i128` - Old value
+/// * `i128` - New value
+pub fn emit_parameter_updated(
+    e: &Env,
+    key: Symbol,
+    category: Symbol,
+    admin: &Address,
+    old_value: i128,
+    new_value: i128,
+) {
+    let topics = (Symbol::new(e, "param_updated"), key, category, admin.clone());
+    e.events().publish(topics, (old_value, new_value));
 }

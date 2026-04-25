@@ -238,7 +238,7 @@ pub fn process_claims(
     user.require_auth();
 
     let now = e.ledger().timestamp();
-    let mut claims = get_pending_claims(e, user);
+    let claims = get_pending_claims(e, user);
 
     if claims.is_empty() {
         panic!("no pending claims");

@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+use std::vec::Vec;
+
 use crate::{CredenceBond, CredenceBondClient};
 use soroban_sdk::token::{StellarAssetClient, TokenClient};
 use soroban_sdk::{
@@ -12,7 +14,7 @@ fn test_v2_event_indexing_improvements() {
     let e = Env::default();
     e.mock_all_auths();
 
-    let contract_id = e.register_contract(None, CredenceBond);
+    let contract_id = e.register(CredenceBond, ());
     let client = CredenceBondClient::new(&e, &contract_id);
 
     let admin = Address::generate(&e);
@@ -195,7 +197,7 @@ fn test_event_indexing_query_efficiency() {
     let e = Env::default();
     e.mock_all_auths();
 
-    let contract_id = e.register_contract(None, CredenceBond);
+    let contract_id = e.register(CredenceBond, ());
     let client = CredenceBondClient::new(&e, &contract_id);
 
     let admin = Address::generate(&e);
@@ -227,7 +229,9 @@ fn test_event_indexing_query_efficiency() {
         client.create_bond_with_rolling(identity, &amount, &86400_u64, &false, &0_u64);
         
         // Advance time for uniqueness
-        e.ledger().set_timestamp(e.ledger().timestamp() + 1000);
+        let mut ledger_info = e.ledger().get();
+        ledger_info.timestamp += 1000;
+        e.ledger().set(ledger_info);
     }
 
     let events = e.events().all();
@@ -275,7 +279,7 @@ fn test_event_schema_compatibility() {
     let e = Env::default();
     e.mock_all_auths();
 
-    let contract_id = e.register_contract(None, CredenceBond);
+    let contract_id = e.register(CredenceBond, ());
     let client = CredenceBondClient::new(&e, &contract_id);
 
     let admin = Address::generate(&e);
@@ -308,14 +312,14 @@ fn test_event_schema_compatibility() {
         }
         
         let event_name = Symbol::from_val(&e, &event.1.get(0).unwrap());
-        match event_name.to_string().as_str() {
-            "bond_created" => old_events += 1,
-            "bond_created_v2" => new_events += 1,
-            "bond_withdrawn" => old_events += 1,
-            "bond_withdrawn_v2" => new_events += 1,
-            "bond_increased" => old_events += 1,
-            "bond_increased_v2" => new_events += 1,
-            _ => {}
+        if event_name == Symbol::new(&e, "bond_created") || 
+           event_name == Symbol::new(&e, "bond_withdrawn") ||
+           event_name == Symbol::new(&e, "bond_increased") {
+            old_events += 1;
+        } else if event_name == Symbol::new(&e, "bond_created_v2") || 
+                  event_name == Symbol::new(&e, "bond_withdrawn_v2") ||
+                  event_name == Symbol::new(&e, "bond_increased_v2") {
+            new_events += 1;
         }
     }
 

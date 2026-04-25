@@ -28,13 +28,14 @@ use soroban_sdk::Address;
 /// Addresses in Soroban are validated by the framework through the auth system.
 /// The primary validation is that recipients should be able to receive tokens.
 /// This function provides explicit checking at transfer call sites.
+#[allow(dead_code)]
 pub fn validate_recipient(recipient: &Address, contract: &Address) {
     // Prevent self-transfers: the contract should not transfer tokens to itself
     // as this could cause accounting issues or be a sign of a logic error.
     if recipient == contract {
         panic!("recipient cannot be the contract itself");
     }
-    
+
     // Note: In Soroban, addresses are validated through the auth system.
     // We don't need to check for "zero address" as that concept doesn't exist.
     // The require_auth() calls in the calling code provide the primary validation.
@@ -78,7 +79,8 @@ pub fn validate_bond_amount(amount: i128) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{Address, Env};
 
     #[test]
     fn test_validate_bond_amount_valid() {

@@ -127,9 +127,7 @@ pub fn register_bond_holder(e: &Env, identity: &Address) {
         .set(&ScanKey::BondHolderRegistry, &registry);
 
     let size = registry.len();
-    e.storage()
-        .instance()
-        .set(&ScanKey::RegistrySize, &size);
+    e.storage().instance().set(&ScanKey::RegistrySize, &size);
 
     e.events().publish(
         (Symbol::new(e, "bond_holder_registered"),),
@@ -158,9 +156,7 @@ pub fn deregister_bond_holder(e: &Env, identity: &Address) {
             .set(&ScanKey::BondHolderRegistry, &registry);
 
         let size = registry.len();
-        e.storage()
-            .instance()
-            .set(&ScanKey::RegistrySize, &size);
+        e.storage().instance().set(&ScanKey::RegistrySize, &size);
 
         e.events().publish(
             (Symbol::new(e, "bond_holder_deregistered"),),

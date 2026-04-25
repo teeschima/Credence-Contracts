@@ -10,7 +10,7 @@
 //! - Upgrade history tracking
 
 use crate::{events, DataKey};
-use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, Env, Vec};
 
 /// Upgrade authorization roles
 #[contracttype]
@@ -51,7 +51,7 @@ pub struct UpgradeProposal {
     /// New implementation address
     pub new_implementation: Address,
     /// Additional data for the upgrade
-    pub upgrade_data: soroban_sdk::Bytes,
+    pub upgrade_data: Bytes,
     /// When the proposal was created
     pub created_at: u64,
     /// Current status of the proposal
@@ -103,19 +103,21 @@ impl DataKey {
         DataKey::UpgradeAuth(address.clone())
     }
 
-    /// List of all authorized upgraders: DataKey::AuthorizedUpgraders -> Vec<Address>
     pub fn authorized_upgraders() -> DataKey {
         DataKey::AuthorizedUpgraders
     }
 
-    /// Current implementation address: DataKey::Implementation -> Address
     pub fn implementation() -> DataKey {
         DataKey::Implementation
     }
 
-    /// Upgrade admin address: DataKey::UpgradeAdmin -> Address
     pub fn upgrade_admin() -> DataKey {
         DataKey::UpgradeAdmin
+    }
+
+    /// Pending upgrade admin address: DataKey::PndgUpgrAdmin -> Address
+    pub fn pending_upgrade_admin() -> DataKey {
+        DataKey::PndgUpgrAdmin
     }
 
     /// Upgrade proposal by ID: DataKey::UpgradeProposal(proposal_id) -> UpgradeProposal
@@ -123,12 +125,10 @@ impl DataKey {
         DataKey::UpgradeProposal(proposal_id)
     }
 
-    /// Next proposal ID counter: DataKey::NextProposalId -> u64
     pub fn next_proposal_id() -> DataKey {
         DataKey::NextProposalId
     }
 
-    /// Upgrade history: DataKey::UpgradeHistory -> Vec<UpgradeRecord>
     pub fn upgrade_history() -> DataKey {
         DataKey::UpgradeHistory
     }
@@ -423,7 +423,7 @@ pub fn propose_upgrade(
     e: &Env,
     proposer: &Address,
     new_implementation: &Address,
-    upgrade_data: soroban_sdk::Bytes,
+    upgrade_data: Bytes,
     required_approvals: u32,
 ) -> u64 {
     proposer.require_auth();
@@ -683,4 +683,93 @@ pub fn get_upgrade_history(e: &Env) -> Vec<UpgradeRecord> {
         .instance()
         .get(&DataKey::UpgradeHistory)
         .unwrap_or(Vec::new(e))
+}
+/// Propose a new upgrade admin (two-step transfer)
+pub fn transfer_upgrade_admin(e: &Env, admin: &Address, new_admin: &Address) {
+    admin.require_auth();
+    require_upgrade_admin(e, admin);
+
+    if admin == new_admin {
+        panic!("new admin must be different");
+    }
+
+    // Zero-address check
+    let zero_str = soroban_sdk::String::from_str(e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    if new_admin.to_string() == zero_str {
+        panic!("ZeroAddress");
+    }
+
+    e.storage()
+        .instance()
+        .set(&DataKey::PndgUpgrAdmin, new_admin);
+
+    events::emit_upgrade_admin_transfer_started(e, admin, new_admin);
+}
+
+/// Accept the upgrade admin role (second step of transfer)
+pub fn accept_upgrade_admin(e: &Env, caller: &Address) {
+    caller.require_auth();
+    let pending_admin: Address = e
+        .storage()
+        .instance()
+        .get(&DataKey::PndgUpgrAdmin)
+        .unwrap_or_else(|| panic!("no pending upgrade admin"));
+
+    if *caller != pending_admin {
+        panic!("not pending upgrade admin");
+    }
+
+    let old_admin: Address = e
+        .storage()
+        .instance()
+        .get(&DataKey::UpgradeAdmin)
+        .unwrap_or_else(|| panic!("no upgrade admin"));
+
+    // Update upgrade admin
+    e.storage().instance().set(&DataKey::UpgradeAdmin, caller);
+
+    // Grant Upgrader role to the new admin
+    let auth = UpgradeAuthorization {
+        authorized_address: caller.clone(),
+        role: UpgradeRole::Upgrader,
+        granted_at: e.ledger().timestamp(),
+        expires_at: 0, // No expiry
+        granted_by: caller.clone(),
+        active: true,
+    };
+
+    e.storage()
+        .instance()
+        .set(&DataKey::UpgradeAuth(caller.clone()), &auth);
+
+    // Update authorized upgraders list
+    let mut upgraders: Vec<Address> = e
+        .storage()
+        .instance()
+        .get(&DataKey::AuthorizedUpgraders)
+        .unwrap_or(Vec::new(e));
+    
+    let mut already_in = false;
+    for i in 0..upgraders.len() {
+        if upgraders.get(i).unwrap() == *caller {
+            already_in = true;
+            break;
+        }
+    }
+    if !already_in {
+        upgraders.push_back(caller.clone());
+        e.storage()
+            .instance()
+            .set(&DataKey::AuthorizedUpgraders, &upgraders);
+    }
+
+    // Clear pending admin
+    e.storage().instance().remove(&DataKey::PndgUpgrAdmin);
+
+    events::emit_upgrade_admin_transfer_completed(e, &old_admin, caller);
+}
+
+/// Get the pending upgrade admin address
+pub fn get_pending_upgrade_admin(e: &Env) -> Option<Address> {
+    e.storage().instance().get(&DataKey::PndgUpgrAdmin)
 }

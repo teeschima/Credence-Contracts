@@ -2,11 +2,8 @@
 
 use crate::test_helpers::*;
 use crate::{
-    apply_bps,
-    FixedDurationBond,
-    FixedDurationBondClient,
-    MAX_FEE_BPS,
-    DEFAULT_MAX_STALENESS,
+    apply_bps, FixedDurationBond, FixedDurationBondClient, DEFAULT_MAX_STALENESS,
+    MAX_BOND_DURATION_SECS, MAX_FEE_BPS, MIN_BOND_DURATION_SECS,
 };
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::token::TokenClient;
@@ -114,6 +111,30 @@ fn test_create_bond_zero_duration_panics() {
     let e = Env::default();
     let (client, _admin, owner, _token, _cid) = setup(&e);
     client.create_bond(&owner, &1_000_i128, &0_u64);
+}
+
+#[test]
+#[should_panic(expected = "duration out of allowed bounds")]
+fn test_create_bond_duration_above_max_panics() {
+    let e = Env::default();
+    let (client, _admin, owner, _token, _cid) = setup(&e);
+    client.create_bond(&owner, &1_000_i128, &(MAX_BOND_DURATION_SECS + 1));
+}
+
+#[test]
+fn test_create_bond_duration_at_bounds_succeeds() {
+    let e = Env::default();
+    let (client, _admin, owner, _token, _cid) = setup(&e);
+
+    let min_bond = client.create_bond(&owner, &1_000_i128, &MIN_BOND_DURATION_SECS);
+    assert_eq!(min_bond.bond_duration, MIN_BOND_DURATION_SECS);
+
+    e.ledger()
+        .with_mut(|li| li.timestamp += MIN_BOND_DURATION_SECS + 1);
+    client.withdraw(&owner);
+
+    let max_bond = client.create_bond(&owner, &1_000_i128, &MAX_BOND_DURATION_SECS);
+    assert_eq!(max_bond.bond_duration, MAX_BOND_DURATION_SECS);
 }
 
 #[test]
@@ -544,7 +565,8 @@ fn test_quote_value_rejects_stale_answer() {
     client.set_oracle_safety(&admin, &token, &1_i128, &2_000_000_i128);
     // set updated_at to older than default staleness
     // ensure ledger now is large enough to create a stale timestamp without underflow
-    e.ledger().with_mut(|li| li.timestamp = DEFAULT_MAX_STALENESS + 10);
+    e.ledger()
+        .with_mut(|li| li.timestamp = DEFAULT_MAX_STALENESS + 10);
     let now = e.ledger().timestamp();
     let stale = now - (DEFAULT_MAX_STALENESS + 1);
     client.quote_value(&token, &10_i128, &1_000_i128, &stale, &1_u64, &1_u64);
@@ -778,10 +800,9 @@ fn test_arithmetic_max_duration_safe_timestamp_no_overflow() {
     e.ledger().with_mut(|li| li.timestamp = 0);
     let (client, _admin, owner, _tok, _cid) = setup(&e);
 
-    // 365 days — well within u64 range.
-    let bond = client.create_bond(&owner, &1_000_i128, &(365 * ONE_DAY));
-    assert_eq!(bond.bond_duration, 365 * ONE_DAY);
-    assert_eq!(bond.bond_expiry, 365 * ONE_DAY);
+    let bond = client.create_bond(&owner, &1_000_i128, &MAX_BOND_DURATION_SECS);
+    assert_eq!(bond.bond_duration, MAX_BOND_DURATION_SECS);
+    assert_eq!(bond.bond_expiry, MAX_BOND_DURATION_SECS);
 }
 
 /// Expiry timestamp overflow is caught and panics cleanly.
@@ -862,7 +883,7 @@ fn test_fee_on_transfer_rejection_documented() {
     //
     // The balance-delta checks are already implemented in:
     // - create_bond(): line ~250
-    // - withdraw(): line ~330  
+    // - withdraw(): line ~330
     // - withdraw_early(): line ~390
     //
     // All use the same pattern:

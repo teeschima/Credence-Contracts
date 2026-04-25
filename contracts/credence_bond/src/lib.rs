@@ -1,11 +1,16 @@
 #![no_std]
 
+#[cfg(test)]
+extern crate std;
+
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, IntoVal, String, Symbol, Val, Vec,
+    contract, contractimpl, contracttype, Address, Bytes, Env, IntoVal, String, Symbol, Val,
+    Vec,
 };
 
 pub mod access_control;
 mod batch;
+mod claims;
 mod cooldown;
 pub mod early_exit_penalty;
 mod emergency;
@@ -19,14 +24,16 @@ pub mod liquidation_scanner;
 #[allow(dead_code)]
 mod math;
 mod nonce;
+#[allow(dead_code)]
+mod normalization;
 mod parameters;
 pub mod pausable;
 pub mod rolling_bond;
+mod safe_token;
 mod same_ledger_liquidation_guard;
-#[allow(dead_code)]
 mod slash_history;
-#[allow(dead_code)]
 mod slashing;
+pub mod status_snapshot;
 pub mod tiered_bond;
 mod token_integration;
 pub mod types;
@@ -34,9 +41,6 @@ pub mod upgrade_auth;
 mod validation;
 pub mod verifier;
 mod weighted_attestation;
-pub mod claims;
-mod safe_token;
-
 use crate::access_control::{
     add_verifier_role, is_verifier, remove_verifier_role, require_verifier,
 };
@@ -118,26 +122,29 @@ pub enum DataKey {
     PauseProposal(u64),
     PauseApproval(u64, Address),
     PauseApprovalCount(u64),
-    GraceWindow, // FIX 1: added for configurable post-expiry grace window
-    // Claims module storage keys
     PendingClaims(Address),
     ClaimableAmount(Address),
     ClaimCounter,
     ClaimById(u64),
     BondToken,
-    Token,
+    GraceWindow, // FIX 1: added for configurable post-expiry grace window
     // Upgrade authorization storage keys
     TotalSupply,
     UpgradeAuth(Address),
     AuthorizedUpgraders,
     Implementation,
     UpgradeAdmin,
+    PndgAdmin,
+    PndgUpgrAdmin,
     UpgradeProposal(u64),
     NextProposalId,
     UpgradeHistory,
     // Supply cap enforcement storage keys
     SupplyCap,
+    TotalSupply,
     LastCollateralIncreaseLedger,
+    // Borrow freeze
+    BorrowFrozen,
 }
 
 /// Maximum number of bonds that can be created in a single batch.
@@ -208,6 +215,63 @@ impl CredenceBond {
             .instance()
             .set(&Symbol::new(&e, "admin"), &admin);
         e.storage().instance().set(&DataKey::TotalSupply, &0_i128);
+
+        // Initialize upgrade authorization with the same admin
+        upgrade_auth::initialize_upgrade_auth(&e, &admin);
+    }
+
+    /// Propose a new admin for the contract (two-step transfer).
+    pub fn transfer_admin(e: Env, caller: Address, new_admin: Address) {
+        caller.require_auth();
+        Self::require_admin_internal(&e, &caller);
+
+        if caller == new_admin {
+            panic!("new admin must be different from current admin");
+        }
+
+        // Zero-address check
+        let zero_str = soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        if new_admin.to_string() == zero_str {
+            panic!("ZeroAddress");
+        }
+
+        e.storage().instance().set(&DataKey::PndgAdmin, &new_admin);
+        events::emit_admin_transfer_started(&e, &caller, &new_admin);
+    }
+
+    /// Accept the admin role (second step of transfer).
+    pub fn accept_admin(e: Env, caller: Address) {
+        caller.require_auth();
+        let pending_admin: Address = e
+            .storage()
+            .instance()
+            .get(&DataKey::PndgAdmin)
+            .unwrap_or_else(|| panic!("no pending admin"));
+
+        if caller != pending_admin {
+            panic!("only pending admin can accept the role");
+        }
+
+        let old_admin: Address = e
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("current admin not found"));
+
+        // Update admin
+        e.storage().instance().set(&DataKey::Admin, &caller);
+        // Also update the symbol-based admin key for consistency if used
+        e.storage().instance().set(&Symbol::new(&e, "admin"), &caller);
+        
+        // Clear pending admin
+        e.storage().instance().remove(&DataKey::PndgAdmin);
+
+        events::emit_admin_transfer_completed(&e, &old_admin, &caller);
+    }
+
+    /// Get the pending admin address.
+    pub fn get_pending_admin(e: Env) -> Option<Address> {
+        e.storage().instance().get(&DataKey::PndgAdmin)
     }
 
     /// Set the supply cap for the bond market. Only admin can call.
@@ -215,18 +279,17 @@ impl CredenceBond {
     /// @param admin Address that can set the supply cap
     /// @param cap Maximum total bonded amount allowed (0 = no cap)
     pub fn set_supply_cap(e: Env, admin: Address, cap: i128) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
-        
+
         if cap < 0 {
             panic!("supply cap must be non-negative");
         }
-        
+
         e.storage().instance().set(&DataKey::SupplyCap, &cap);
-        e.events().publish(
-            (Symbol::new(&e, "supply_cap_updated"),),
-            (admin, cap),
-        );
+        e.events()
+            .publish((Symbol::new(&e, "supply_cap_updated"),), (admin, cap));
     }
 
     /// Get the current supply cap.
@@ -251,9 +314,6 @@ impl CredenceBond {
         Self::require_admin_internal(&e, &admin);
 
         // Zero-address check
-        if treasury.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-            panic!("ZeroAddress");
-        }
 
         early_exit_penalty::set_config(&e, treasury, penalty_bps);
     }
@@ -266,14 +326,19 @@ impl CredenceBond {
         emergency_fee_bps: u32,
         enabled: bool,
     ) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
 
         // Zero-address checks
-        if governance.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
+        if governance.to_string()
+            == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        {
             panic!("ZeroAddress");
         }
-        if treasury.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
+        if treasury.to_string()
+            == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        {
             panic!("ZeroAddress");
         }
 
@@ -302,7 +367,8 @@ impl CredenceBond {
         emergency::set_config(&e, governance, treasury, emergency_fee_bps, enabled);
     }
 
-    pub fn set_emergency_mode(e: Env, admin: Address, governance: Address, enabled: bool, reason: Symbol) {
+    pub fn set_emergency_mode(e: Env, admin: Address, governance: Address, enabled: bool) {
+        pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         let cfg = emergency::get_config(&e);
         if governance != cfg.governance {
@@ -321,6 +387,7 @@ impl CredenceBond {
         amount: i128,
         reason: Symbol,
     ) -> IdentityBond {
+        pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         let cfg = emergency::get_config(&e);
         if governance != cfg.governance {
@@ -383,6 +450,14 @@ impl CredenceBond {
     pub fn get_emergency_config(e: Env) -> emergency::EmergencyConfig {
         emergency::get_config(&e)
     }
+
+    /// Return a stable, backend-friendly snapshot of the current bond status.
+    ///
+    /// Read-only. Includes tier, cooldown remaining, emergency mode, and
+    /// available balance. Safe to call at any time after bond creation.
+    pub fn get_bond_status_snapshot(e: Env) -> status_snapshot::BondStatusSnapshot {
+        status_snapshot::get_bond_status_snapshot(&e)
+    }
     pub fn get_latest_emergency_record_id(e: Env) -> u64 {
         emergency::latest_record_id(&e)
     }
@@ -390,22 +465,30 @@ impl CredenceBond {
         emergency::get_record(&e, id)
     }
 
-    pub fn get_emergency_transition(e: Env, id: u64) -> emergency::EmergencyModeTransition {
-        emergency::get_transition(&e, id)
+    /// Propose a new upgrade admin (two-step transfer).
+    pub fn transfer_upgrade_admin(e: Env, admin: Address, new_admin: Address) {
+        upgrade_auth::transfer_upgrade_admin(&e, &admin, &new_admin);
     }
 
-    pub fn latest_emergency_transition(e: Env) -> u64 {
-        emergency::latest_transition_id(&e)
+    /// Accept the upgrade admin role (second step of transfer).
+    pub fn accept_upgrade_admin(e: Env, caller: Address) {
+        upgrade_auth::accept_upgrade_admin(&e, &caller);
     }
 
+    /// Get the pending upgrade admin address.
+    pub fn get_pending_upgrade_admin(e: Env) -> Option<Address> {
+        upgrade_auth::get_pending_upgrade_admin(&e)
+    }
+
+    /// Check if an address is an authorized upgrader.
+    pub fn is_authorized_upgrader(e: Env, address: Address) -> bool {
+        upgrade_auth::is_authorized_upgrader(&e, &address)
+    }
     /// Register an authorized attester (only admin can call).
     pub fn register_attester(e: Env, attester: Address) {
         pausable::require_not_paused(&e);
 
         // Zero-address check
-        if attester.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-            panic!("ZeroAddress");
-        }
 
         let admin: Address = e
             .storage()
@@ -447,6 +530,7 @@ impl CredenceBond {
     }
 
     pub fn set_verifier_stake_requirement(e: Env, admin: Address, min_stake: i128) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
         verifier::set_min_stake(&e, min_stake);
@@ -460,10 +544,8 @@ impl CredenceBond {
         verifier_addr: Address,
         stake_deposit: i128,
     ) -> verifier::VerifierInfo {
+        pausable::require_not_paused(&e);
         // Zero-address check
-        if verifier_addr.to_string() == soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-            panic!("ZeroAddress");
-        }
 
         verifier_addr.require_auth();
         Self::with_reentrancy_guard(&e, || {
@@ -471,6 +553,7 @@ impl CredenceBond {
         })
     }
     pub fn deactivate_verifier(e: Env, verifier_addr: Address) -> verifier::VerifierInfo {
+        pausable::require_not_paused(&e);
         verifier_addr.require_auth();
         verifier::deactivate_verifier(&e, &verifier_addr, Symbol::new(&e, "self"))
     }
@@ -479,6 +562,7 @@ impl CredenceBond {
         admin: Address,
         verifier_addr: Address,
     ) -> verifier::VerifierInfo {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
         verifier::deactivate_verifier(&e, &verifier_addr, Symbol::new(&e, "admin"))
@@ -488,6 +572,7 @@ impl CredenceBond {
         verifier_addr: Address,
         amount: i128,
     ) -> verifier::VerifierInfo {
+        pausable::require_not_paused(&e);
         verifier_addr.require_auth();
         Self::with_reentrancy_guard(&e, || verifier::withdraw_stake(&e, &verifier_addr, amount))
     }
@@ -500,15 +585,18 @@ impl CredenceBond {
         verifier_addr: Address,
         new_reputation: i128,
     ) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
         verifier::set_reputation(&e, &verifier_addr, new_reputation, Symbol::new(&e, "admin"));
     }
 
     pub fn set_token(e: Env, admin: Address, token: Address) {
+        pausable::require_not_paused(&e);
         token_integration::set_token(&e, &admin, &token);
     }
     pub fn set_usdc_token(e: Env, admin: Address, token: Address, network: String) {
+        pausable::require_not_paused(&e);
         token_integration::set_usdc_token(&e, &admin, &token, &network);
     }
     pub fn get_usdc_token(e: Env) -> Address {
@@ -519,6 +607,8 @@ impl CredenceBond {
     }
 
     pub fn create_bond(e: Env, identity: Address, amount: i128, duration: u64) -> IdentityBond {
+        pausable::require_not_paused(&e);
+        parameters::require_not_borrow_frozen(&e);
         validation::validate_bond_amount(amount);
         validation::validate_bond_duration(duration);
         leverage::validate_leverage(amount, parameters::get_max_leverage(&e));
@@ -544,36 +634,42 @@ impl CredenceBond {
         // require token configuration (token may be unset in unit tests).
         validation::validate_bond_duration(duration);
 
+        pausable::require_not_paused(&e);
+        parameters::require_not_borrow_frozen(&e);
         identity.require_auth();
         token_integration::transfer_into_contract(&e, &identity, amount);
         let bond_start = e.ledger().timestamp();
         let _end = bond_start.checked_add(duration).expect("bond end overflow");
         let (fee, net_amount) = fees::calculate_fee(&e, amount);
-        
+
         // Enforce supply cap - check after calculating net_amount
         let supply_cap = Self::get_supply_cap(e.clone());
         if supply_cap > 0 {
             let current_total_supply = Self::get_total_supply(e.clone());
-            let new_total_supply = current_total_supply.checked_add(net_amount)
+            let new_total_supply = current_total_supply
+                .checked_add(net_amount)
                 .expect("total supply overflow");
             if new_total_supply > supply_cap {
                 panic!("supply cap exceeded");
             }
         }
-        
+
         if fee > 0 {
             let (treasury_opt, _) = fees::get_config(&e);
             if let Some(treasury) = treasury_opt {
                 fees::record_fee(&e, &identity, amount, fee, &treasury);
             }
         }
-        
+
         // Update total supply after successful bond creation
         let current_total_supply = Self::get_total_supply(e.clone());
-        let new_total_supply = current_total_supply.checked_add(net_amount)
+        let new_total_supply = current_total_supply
+            .checked_add(net_amount)
             .expect("total supply overflow");
-        e.storage().instance().set(&DataKey::TotalSupply, &new_total_supply);
-        
+        e.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &new_total_supply);
+
         let bond = IdentityBond {
             identity: identity.clone(),
             bonded_amount: net_amount,
@@ -592,11 +688,11 @@ impl CredenceBond {
         let old_tier = BondTier::Bronze;
         let new_tier = tiered_bond::get_tier_for_amount(net_amount);
         tiered_bond::emit_tier_change_if_needed(&e, &identity, old_tier, new_tier);
-        
+
         // Emit both old and new events for backward compatibility during migration
         events::emit_bond_created(&e, &identity, amount, duration, is_rolling);
         events::emit_bond_created_v2(&e, &identity, amount, duration, is_rolling, bond_start);
-        
+
         bond
     }
 
@@ -609,28 +705,32 @@ impl CredenceBond {
     }
 
     /// Check if bond is currently active and can accept user actions.
-    /// 
+    ///
     /// This function should be called before any user action that requires
     /// an active bond, ensuring inactive bonds cannot accept actions.
-    /// 
+    ///
     /// # Returns
     /// * `true` if bond exists and is active
     /// * `false` if bond does not exist or is inactive
-    /// 
+    ///
     /// # Panics
     /// * If bond configuration is invalid
     pub fn is_bond_active(e: Env) -> bool {
-        match e.storage().instance().get::<_, IdentityBond>(&DataKey::Bond) {
+        match e
+            .storage()
+            .instance()
+            .get::<_, IdentityBond>(&DataKey::Bond)
+        {
             Some(bond) => bond.active,
             None => false,
         }
     }
 
     /// Require that bond is active before proceeding with an action.
-    /// 
+    ///
     /// This is a helper function to ensure consistent validation
     /// across all functions that require an active bond.
-    /// 
+    ///
     /// # Panics
     /// * "bond not found" if no bond exists
     /// * "bond not active" if bond exists but is inactive
@@ -640,7 +740,7 @@ impl CredenceBond {
             .instance()
             .get(&DataKey::Bond)
             .unwrap_or_else(|| panic!("bond not found"));
-            
+
         if !bond.active {
             panic!("bond not active - cannot perform action");
         }
@@ -663,6 +763,7 @@ impl CredenceBond {
         deadline: u64,
         nonce: u64,
     ) -> Attestation {
+        pausable::require_not_paused(&e);
         // Use nonce validation which reads the configured grace window internally
         nonce::validate_and_consume(&e, &attester, &contract_id, deadline, nonce);
         attester.require_auth();
@@ -710,10 +811,16 @@ impl CredenceBond {
         e.storage().instance().set(&subject_key, &attestations);
         verifier::record_attestation_issued(&e, &attester, weight);
 
-        // Add verifier reward claim (base reward + weight bonus)
-        let base_reward = 1000i128; // Base reward for attestation
-        let weight_bonus = (weight as i128) * 100; // Bonus based on weight
-        let total_reward = base_reward + weight_bonus;
+        // Add verifier reward claim (base reward + weight bonus).
+        // Both operations use checked arithmetic: weight is u32 (max 1_000_000)
+        // so weight_bonus fits in i128, but we guard against any future limit change.
+        let base_reward = 1000i128;
+        let weight_bonus = (weight as i128)
+            .checked_mul(100)
+            .expect("reward weight_bonus overflow");
+        let total_reward = base_reward
+            .checked_add(weight_bonus)
+            .expect("reward total overflow");
 
         claims::add_pending_claim(
             &e,
@@ -796,21 +903,22 @@ impl CredenceBond {
     // ΓöÇΓöÇ Market Activation Validation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     /// Validates all required parameters before bond activation.
-    /// 
+    ///
     /// This function enforces comprehensive validation to prevent activation with
     /// incomplete or invalid risk parameters, as required by issue #179.
-    /// 
+    ///
     /// # Arguments
     /// * `e` - Soroban environment
     /// * `amount` - Bond amount to validate
     /// * `duration` - Bond duration in seconds
     /// * `is_rolling` - Whether this is a rolling bond
     /// * `notice_period_duration` - Notice period duration for rolling bonds
-    /// 
+    ///
     /// # Panics
     /// * If any required parameter is missing or invalid
     /// * If token configuration is incomplete
     /// * If risk parameters are out of acceptable ranges
+    #[allow(dead_code)]
     fn validate_bond_activation_parameters(
         e: &Env,
         amount: i128,
@@ -820,22 +928,25 @@ impl CredenceBond {
     ) {
         // 1. Validate bond amount using existing validation
         validation::validate_bond_amount(amount);
-        
+
         // 2. Validate bond duration using existing validation
         validation::validate_bond_duration(duration);
-        
+
         // 3. Validate token configuration is complete
-        let token_addr = e.storage().instance().get::<_, Address>(&DataKey::BondToken);
+        let token_addr = e
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::BondToken);
         if token_addr.is_none() {
             panic!("bond token not configured - cannot activate bond");
         }
-        
+
         // 4. Validate fee configuration is set
-        let (treasury_opt, fee_bps) = fees::get_config(e);
+        let (treasury_opt, _fee_bps) = fees::get_config(e);
         if treasury_opt.is_none() {
             panic!("fee treasury not configured - cannot activate bond");
         }
-        
+
         // 5. Validate rolling bond specific parameters
         if is_rolling {
             if notice_period_duration == 0 {
@@ -847,16 +958,19 @@ impl CredenceBond {
             // Validate notice period against configured cooldown
             let cooldown_period = cooldown::get_cooldown_period(e);
             if notice_period_duration < cooldown_period {
-                panic!("notice period must be at least cooldown period ({} seconds)", cooldown_period);
+                panic!(
+                    "notice period must be at least cooldown period ({} seconds)",
+                    cooldown_period
+                );
             }
         }
-        
+
         // 6. Validate tier thresholds are configured (prevent activation with zero thresholds)
         let bronze_threshold = parameters::get_bronze_threshold(e);
         let silver_threshold = parameters::get_silver_threshold(e);
         let gold_threshold = parameters::get_gold_threshold(e);
         let platinum_threshold = parameters::get_platinum_threshold(e);
-        
+
         if bronze_threshold <= 0 {
             panic!("bronze threshold not configured - cannot activate bond");
         }
@@ -869,38 +983,39 @@ impl CredenceBond {
         if platinum_threshold <= gold_threshold {
             panic!("platinum threshold must be greater than gold threshold");
         }
-        
+
         // 7. Validate max leverage is configured and reasonable
         let max_leverage = parameters::get_max_leverage(e);
         if max_leverage == 0 {
             panic!("max leverage not configured - cannot activate bond");
         }
-        
+
         // 8. Validate attester stake requirement is set
         let min_stake = verifier::get_min_stake(e);
         if min_stake < 0 {
             panic!("invalid verifier stake requirement - cannot activate bond");
         }
-        
+
         // 9. Validate emergency configuration if enabled
         let emergency_config = emergency::get_config(e);
         if emergency_config.enabled {
-            // Validation is performed during set_config at setup time.
+            // Address is not Option, so we don't need is_none check if it's stored directly.
+            // These addresses are required fields in the EmergencyConfig struct.
             if emergency_config.emergency_fee_bps > 10000 {
                 panic!("emergency fee exceeds maximum (10000 bps = 100%)");
             }
         }
-        
+
         // 10. Additional parameter range validations
         if amount == 0 {
             panic!("bond amount cannot be zero");
         }
-        
+
         // Validate amount against tier thresholds
         if amount < bronze_threshold {
             panic!("bond amount below minimum threshold (bronze tier)");
         }
-        
+
         // Validate leverage constraints
         let leverage = amount / validation::MIN_BOND_AMOUNT;
         if leverage > max_leverage as i128 {
@@ -913,6 +1028,7 @@ impl CredenceBond {
     /// Set the post-deadline grace window (in seconds). Only admin can call.
     /// A value of 0 restores strict enforcement (default behaviour).
     pub fn set_grace_window(e: Env, admin: Address, grace_seconds: u64) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
         e.storage()
@@ -931,10 +1047,12 @@ impl CredenceBond {
     // ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     pub fn set_attester_stake(e: Env, admin: Address, attester: Address, amount: i128) {
+        pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         weighted_attestation::set_attester_stake(&e, &attester, amount);
     }
     pub fn set_weight_config(e: Env, admin: Address, multiplier_bps: u32, max_weight: u32) {
+        pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         weighted_attestation::set_weight_config(&e, multiplier_bps, max_weight);
     }
@@ -943,13 +1061,16 @@ impl CredenceBond {
     }
 
     pub fn withdraw(e: Env, amount: i128) -> IdentityBond {
+        pausable::require_not_paused(&e);
         Self::withdraw_bond(e, amount)
     }
 
     pub fn withdraw_bond(e: Env, amount: i128) -> IdentityBond {
+        pausable::require_not_paused(&e);
         // Ensure bond is active before allowing withdrawal
         Self::require_active_bond(&e);
-        
+        Self::acquire_lock(&e);
+
         let key = DataKey::Bond;
         let mut bond = e
             .storage()
@@ -991,7 +1112,6 @@ impl CredenceBond {
             Self::release_lock(&e);
             panic!("insufficient balance for withdrawal");
         }
-        token_integration::transfer_from_contract(&e, &bond.identity, amount);
         let old_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         bond.bonded_amount = bond.bonded_amount.checked_sub(amount).expect("underflow");
         if bond.bonded_amount == 0 {
@@ -1003,23 +1123,52 @@ impl CredenceBond {
         }
         let new_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         tiered_bond::emit_tier_change_if_needed(&e, &bond.identity, old_tier, new_tier);
-        
+
         // Update total supply after withdrawal
         let current_total_supply = Self::get_total_supply(e.clone());
-        let new_total_supply = current_total_supply.checked_sub(amount)
+        let new_total_supply = current_total_supply
+            .checked_sub(amount)
             .expect("total supply underflow");
-        e.storage().instance().set(&DataKey::TotalSupply, &new_total_supply);
-        
+        e.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &new_total_supply);
+
         e.storage().instance().set(&key, &bond);
-        
+
         // Emit both old and new events for backward compatibility during migration
         events::emit_bond_withdrawn(&e, &bond.identity, amount, bond.bonded_amount);
-        events::emit_bond_withdrawn_v2(&e, &bond.identity, amount, bond.bonded_amount, e.ledger().timestamp(), false, 0);
+        events::emit_bond_withdrawn_v2(
+            &e,
+            &bond.identity,
+            amount,
+            bond.bonded_amount,
+            e.ledger().timestamp(),
+            false,
+            0,
+        );
         
+        // External call after all state updates (CEI pattern)
+        token_integration::transfer_from_contract(&e, &bond.identity, amount);
+        Self::release_lock(&e);
+
+        // INTERACTIONS: external calls after state is committed.
+        // Invoke callback so observers are notified; reentrancy is blocked by the held lock.
+        let cb_key = Symbol::new(&e, "callback");
+        if let Some(cb_addr) = e.storage().instance().get::<_, Address>(&cb_key) {
+            let fn_name = Symbol::new(&e, "on_withdraw");
+            let args: Vec<Val> = Vec::from_array(&e, [amount.into_val(&e)]);
+            e.invoke_contract::<Val>(&cb_addr, &fn_name, args);
+        }
+
+        // Token transfer is the final external call after all state is settled.
+        token_integration::transfer_from_contract(&e, &bond.identity, amount);
+
+        Self::release_lock(&e);
         bond
     }
 
     pub fn withdraw_early(e: Env, amount: i128) -> IdentityBond {
+        pausable::require_not_paused(&e);
         Self::acquire_lock(&e);
         let key = DataKey::Bond;
         let mut bond = e
@@ -1056,14 +1205,45 @@ impl CredenceBond {
         );
         early_exit_penalty::emit_penalty_event(&e, &bond.identity, amount, penalty, &treasury);
 
-        // Calculate net amount and transfer to user
+        let old_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
+        bond.bonded_amount = bond.bonded_amount.checked_sub(amount).expect("underflow");
+        if bond.slashed_amount > bond.bonded_amount {
+            Self::release_lock(&e);
+            panic!("slashed exceeds bonded");
+        }
+        let new_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
+        tiered_bond::emit_tier_change_if_needed(&e, &bond.identity, old_tier, new_tier);
+
+        // Update total supply after early withdrawal
+        let current_total_supply = Self::get_total_supply(e.clone());
+        let new_total_supply = current_total_supply
+            .checked_sub(amount)
+            .expect("total supply underflow");
+        e.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &new_total_supply);
+
+        e.storage().instance().set(&key, &bond);
+
+        // Emit both old and new events for backward compatibility during migration
+        // For early withdrawal, we emit the v2 event with penalty information
+        events::emit_bond_withdrawn(&e, &bond.identity, amount, bond.bonded_amount);
+        events::emit_bond_withdrawn_v2(
+            &e,
+            &bond.identity,
+            amount,
+            bond.bonded_amount,
+            e.ledger().timestamp(),
+            true,
+            penalty,
+        );
+
+        // Calculate net amount and transfer to user (after state updates - CEI pattern)
         let net_amount = amount.checked_sub(penalty).expect("penalty exceeds amount");
         token_integration::transfer_from_contract(&e, &bond.identity, net_amount);
 
-        // Instead of transferring penalty to treasury immediately,
-        // add a potential penalty refund claim for good behavior
+        // Transfer penalty to treasury (after state updates - CEI pattern)
         if penalty > 0 {
-            // Transfer penalty to treasury (still push-based for treasury)
             token_integration::transfer_from_contract(&e, &treasury, penalty);
 
             // Add a potential penalty refund claim (50% of penalty can be refunded for good behavior)
@@ -1083,28 +1263,7 @@ impl CredenceBond {
             }
         }
 
-        let old_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
-        bond.bonded_amount = bond.bonded_amount.checked_sub(amount).expect("underflow");
-        if bond.slashed_amount > bond.bonded_amount {
-            Self::release_lock(&e);
-            panic!("slashed exceeds bonded");
-        }
-        let new_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
-        tiered_bond::emit_tier_change_if_needed(&e, &bond.identity, old_tier, new_tier);
-        
-        // Update total supply after early withdrawal
-        let current_total_supply = Self::get_total_supply(e.clone());
-        let new_total_supply = current_total_supply.checked_sub(amount)
-            .expect("total supply underflow");
-        e.storage().instance().set(&DataKey::TotalSupply, &new_total_supply);
-        
-        e.storage().instance().set(&key, &bond);
-        
-        // Emit both old and new events for backward compatibility during migration
-        // For early withdrawal, we emit the v2 event with penalty information
-        events::emit_bond_withdrawn(&e, &bond.identity, amount, bond.bonded_amount);
-        events::emit_bond_withdrawn_v2(&e, &bond.identity, amount, bond.bonded_amount, e.ledger().timestamp(), true, penalty);
-        
+        Self::release_lock(&e);
         bond
     }
 
@@ -1119,6 +1278,7 @@ impl CredenceBond {
 
     /// Request withdrawal (rolling bonds). Withdrawal allowed after notice period.
     pub fn request_withdrawal(e: Env) -> IdentityBond {
+        pausable::require_not_paused(&e);
         let key = DataKey::Bond;
         let mut bond = e
             .storage()
@@ -1142,6 +1302,7 @@ impl CredenceBond {
 
     /// If bond is rolling and period has ended, renew (new period start = now). Emits renewal event.
     pub fn renew_if_rolling(e: Env) -> IdentityBond {
+        pausable::require_not_paused(&e);
         let key = DataKey::Bond;
         let mut bond = e
             .storage()
@@ -1173,6 +1334,7 @@ impl CredenceBond {
     /// Slash a portion of the bond. Admin must be provided and authorized.
     /// Returns the updated bond with increased slashed_amount.
     pub fn slash(e: Env, admin: Address, amount: i128) -> IdentityBond {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::require_admin_internal(&e, &admin);
         if amount < 0 {
@@ -1245,13 +1407,17 @@ impl CredenceBond {
         e.storage().instance().set(&key, &next);
     }
 
-    pub fn set_callback(e: Env, callback: Address) {
+    pub fn set_callback(e: Env, admin: Address, callback: Address) {
+        pausable::require_not_paused(&e);
+        admin.require_auth();
+        Self::require_admin_internal(&e, &admin);
         e.storage()
             .instance()
             .set(&Self::callback_key(&e), &callback);
     }
 
     pub fn set_bond_token(e: Env, admin: Address, token: Address) {
+        pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         e.storage().instance().set(&DataKey::BondToken, &token);
     }
@@ -1289,11 +1455,12 @@ impl CredenceBond {
         governance_approval::get_quorum_config(&e)
     }
 
-    pub fn increase_bond(e: Env, caller: Address, amount: i128) -> IdentityBond {
+    pub fn top_up(e: Env, amount: i128) -> IdentityBond {
+        pausable::require_not_paused(&e);
+        parameters::require_not_borrow_frozen(&e);
         if amount <= 0 {
             panic!("amount must be positive");
         }
-
         Self::with_reentrancy_guard(&e, || {
             let key = DataKey::Bond;
             let mut bond = e
@@ -1301,10 +1468,9 @@ impl CredenceBond {
                 .instance()
                 .get::<_, IdentityBond>(&key)
                 .unwrap_or_else(|| panic!("no bond"));
-            if bond.identity != caller {
-                panic!("not bond owner");
-            }
-            let token_addr: Address = e
+            let caller = bond.identity.clone();
+            caller.require_auth();
+            let _token_addr: Address = e
                 .storage()
                 .instance()
                 .get(&DataKey::BondToken)
@@ -1313,10 +1479,10 @@ impl CredenceBond {
             let new_amount = old_amount
                 .checked_add(amount)
                 .expect("bond increase caused overflow");
-            
+
             // Use safe token operations
             crate::safe_token::safe_transfer_from(&e, &caller, amount);
-            
+
             let old_tier = tiered_bond::get_tier_for_amount(old_amount);
             let new_tier = tiered_bond::get_tier_for_amount(new_amount);
             bond.bonded_amount = new_amount;
@@ -1337,6 +1503,7 @@ impl CredenceBond {
     }
 
     pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
+        pausable::require_not_paused(&e);
         let key = DataKey::Bond;
         let mut bond = e
             .storage()
@@ -1364,6 +1531,7 @@ impl CredenceBond {
         hash_type: EvidenceType,
         description: Option<String>,
     ) -> u64 {
+        pausable::require_not_paused(&e);
         submitter.require_auth();
         evidence::submit_evidence(&e, &submitter, proposal_id, &hash, &hash_type, &description)
     }
@@ -1384,6 +1552,7 @@ impl CredenceBond {
     }
 
     pub fn create_batch_bonds(e: Env, params_list: Vec<BatchBondParams>) -> BatchBondResult {
+        pausable::require_not_paused(&e);
         batch::create_batch_bonds(&e, params_list)
     }
     pub fn validate_batch_bonds(e: Env, params_list: Vec<BatchBondParams>) -> bool {
@@ -1402,59 +1571,81 @@ impl CredenceBond {
         parameters::get_protocol_fee_bps(&e)
     }
     pub fn set_protocol_fee_bps(e: Env, admin: Address, value: u32) {
+        pausable::require_not_paused(&e);
         parameters::set_protocol_fee_bps(&e, &admin, value)
     }
     pub fn get_attestation_fee_bps(e: Env) -> u32 {
         parameters::get_attestation_fee_bps(&e)
     }
     pub fn set_attestation_fee_bps(e: Env, admin: Address, value: u32) {
+        pausable::require_not_paused(&e);
         parameters::set_attestation_fee_bps(&e, &admin, value)
     }
     pub fn get_withdrawal_cooldown_secs(e: Env) -> u64 {
         parameters::get_withdrawal_cooldown_secs(&e)
     }
     pub fn set_withdrawal_cooldown_secs(e: Env, admin: Address, value: u64) {
+        pausable::require_not_paused(&e);
         parameters::set_withdrawal_cooldown_secs(&e, &admin, value)
     }
     pub fn get_slash_cooldown_secs(e: Env) -> u64 {
         parameters::get_slash_cooldown_secs(&e)
     }
     pub fn set_slash_cooldown_secs(e: Env, admin: Address, value: u64) {
+        pausable::require_not_paused(&e);
         parameters::set_slash_cooldown_secs(&e, &admin, value)
     }
     pub fn get_bronze_threshold(e: Env) -> i128 {
         parameters::get_bronze_threshold(&e)
     }
     pub fn set_bronze_threshold(e: Env, admin: Address, value: i128) {
+        pausable::require_not_paused(&e);
         parameters::set_bronze_threshold(&e, &admin, value)
     }
     pub fn get_silver_threshold(e: Env) -> i128 {
         parameters::get_silver_threshold(&e)
     }
     pub fn set_silver_threshold(e: Env, admin: Address, value: i128) {
+        pausable::require_not_paused(&e);
         parameters::set_silver_threshold(&e, &admin, value)
     }
     pub fn get_gold_threshold(e: Env) -> i128 {
         parameters::get_gold_threshold(&e)
     }
     pub fn set_gold_threshold(e: Env, admin: Address, value: i128) {
+        pausable::require_not_paused(&e);
         parameters::set_gold_threshold(&e, &admin, value)
     }
     pub fn get_platinum_threshold(e: Env) -> i128 {
         parameters::get_platinum_threshold(&e)
     }
     pub fn set_platinum_threshold(e: Env, admin: Address, value: i128) {
+        pausable::require_not_paused(&e);
         parameters::set_platinum_threshold(&e, &admin, value)
     }
     pub fn get_max_leverage(e: Env) -> u32 {
         parameters::get_max_leverage(&e)
     }
     pub fn set_max_leverage(e: Env, admin: Address, value: u32) {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         parameters::set_max_leverage(&e, &admin, value)
     }
 
+    /// Returns whether new bond creation and top-ups are currently frozen.
+    pub fn is_borrow_frozen(e: Env) -> bool {
+        parameters::is_borrow_frozen(&e)
+    }
+
+    /// Freeze or unfreeze new bond creation and top-ups. Governance (admin) only.
+    /// Repayments and withdrawals are unaffected.
+    pub fn set_borrow_frozen(e: Env, admin: Address, frozen: bool) {
+        pausable::require_not_paused(&e);
+        parameters::set_borrow_frozen(&e, &admin, frozen)
+    }
+
     pub fn withdraw_bond_full(e: Env, identity: Address) -> i128 {
+        pausable::require_not_paused(&e);
         identity.require_auth();
         Self::acquire_lock(&e);
         let bond_key = DataKey::Bond;
@@ -1495,6 +1686,7 @@ impl CredenceBond {
     }
 
     pub fn slash_bond(e: Env, admin: Address, slash_amount: i128) -> i128 {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::acquire_lock(&e);
         if slash_amount < 0 {
@@ -1552,6 +1744,7 @@ impl CredenceBond {
     }
 
     pub fn collect_fees(e: Env, admin: Address) -> i128 {
+        pausable::require_not_paused(&e);
         admin.require_auth();
         Self::acquire_lock(&e);
         let stored_admin: Address = e
@@ -1577,6 +1770,7 @@ impl CredenceBond {
     }
 
     pub fn set_cooldown_period(e: Env, admin: Address, period: u64) {
+        pausable::require_not_paused(&e);
         let stored_admin: Address = e
             .storage()
             .instance()
@@ -1599,6 +1793,7 @@ impl CredenceBond {
         requester: Address,
         amount: i128,
     ) -> CooldownRequest {
+        pausable::require_not_paused(&e);
         requester.require_auth();
         if amount <= 0 {
             panic!("amount must be positive");
@@ -1633,17 +1828,14 @@ impl CredenceBond {
     }
 
     pub fn execute_cooldown_withdrawal(e: Env, requester: Address) -> IdentityBond {
+        pausable::require_not_paused(&e);
         requester.require_auth();
         Self::acquire_lock(&e);
         let req_key = DataKey::CooldownReq(requester.clone());
-        let request: CooldownRequest = e
-            .storage()
-            .instance()
-            .get(&req_key)
-            .unwrap_or_else(|| {
-                Self::release_lock(&e);
-                panic!("no cooldown request")
-            });
+        let request: CooldownRequest = e.storage().instance().get(&req_key).unwrap_or_else(|| {
+            Self::release_lock(&e);
+            panic!("no cooldown request")
+        });
         let period = cooldown::get_cooldown_period(&e);
         let now = e.ledger().timestamp();
         if !cooldown::can_withdraw(now, request.requested_at, period) {
@@ -1678,11 +1870,22 @@ impl CredenceBond {
         e.storage().instance().set(&bond_key, &bond);
         e.storage().instance().remove(&req_key);
         cooldown::emit_cooldown_executed(&e, &requester, request.amount);
+
+        // INTERACTIONS: invoke callback after all state is committed.
+        // Reentrancy is blocked by the held lock.
+        let cb_key = Symbol::new(&e, "callback");
+        if let Some(cb_addr) = e.storage().instance().get::<_, Address>(&cb_key) {
+            let fn_name = Symbol::new(&e, "on_withdraw");
+            let args: Vec<Val> = Vec::from_array(&e, [request.amount.into_val(&e)]);
+            e.invoke_contract::<Val>(&cb_addr, &fn_name, args);
+        }
+
         Self::release_lock(&e);
         bond
     }
 
     pub fn cancel_cooldown(e: Env, requester: Address) {
+        pausable::require_not_paused(&e);
         requester.require_auth();
         let req_key = DataKey::CooldownReq(requester.clone());
         if !e.storage().instance().has(&req_key) {
@@ -1718,6 +1921,7 @@ impl CredenceBond {
 
     /// Process all pending claims for the caller
     pub fn claim_all_rewards(e: Env, user: Address) -> claims::ClaimResult {
+        pausable::require_not_paused(&e);
         claims::process_claims(&e, &user, soroban_sdk::Vec::new(&e), 0)
     }
 
@@ -1727,11 +1931,13 @@ impl CredenceBond {
         user: Address,
         claim_types: soroban_sdk::Vec<claims::ClaimType>,
     ) -> claims::ClaimResult {
+        pausable::require_not_paused(&e);
         claims::process_claims(&e, &user, claim_types, 0)
     }
 
     /// Process a limited number of claims for the caller
     pub fn claim_rewards_batch(e: Env, user: Address, max_claims: u32) -> claims::ClaimResult {
+        pausable::require_not_paused(&e);
         claims::process_claims(&e, &user, soroban_sdk::Vec::new(&e), max_claims)
     }
 
@@ -1768,18 +1974,30 @@ impl CredenceBond {
 
     /// Register a bond holder in the liquidation scanner registry.
     pub fn register_bond_holder(e: Env, admin: Address, identity: Address) {
-        let stored: Address = e.storage().instance().get(&DataKey::Admin)
+        pausable::require_not_paused(&e);
+        let stored: Address = e
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
             .unwrap_or_else(|| panic!("not initialized"));
-        if stored != admin { panic!("not admin"); }
+        if stored != admin {
+            panic!("not admin");
+        }
         admin.require_auth();
         liquidation_scanner::register_bond_holder(&e, &identity);
     }
 
     /// Deregister a bond holder from the liquidation scanner registry.
     pub fn deregister_bond_holder(e: Env, admin: Address, identity: Address) {
-        let stored: Address = e.storage().instance().get(&DataKey::Admin)
+        pausable::require_not_paused(&e);
+        let stored: Address = e
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
             .unwrap_or_else(|| panic!("not initialized"));
-        if stored != admin { panic!("not admin"); }
+        if stored != admin {
+            panic!("not admin");
+        }
         admin.require_auth();
         liquidation_scanner::deregister_bond_holder(&e, &identity);
     }
@@ -1802,20 +2020,208 @@ impl CredenceBond {
         max_iter: u32,
         min_slash_ratio_bps: u32,
     ) -> liquidation_scanner::ScanResult {
-        liquidation_scanner::scan_liquidation_candidates(&e, &keeper, cursor, max_iter, min_slash_ratio_bps)
+        liquidation_scanner::scan_liquidation_candidates(
+            &e,
+            &keeper,
+            cursor,
+            max_iter,
+            min_slash_ratio_bps,
+        )
     }
 
     /// Advance the keeper cursor (tamper-resistant).
     pub fn advance_keeper_cursor(e: Env, keeper: Address, next_cursor: u32) {
+        pausable::require_not_paused(&e);
         liquidation_scanner::advance_keeper_cursor(&e, &keeper, next_cursor);
+    }
+
+    // ========== UPGRADE AUTHORIZATION ==========
+
+    pub fn initialize_upgrade_auth(e: Env, admin: Address) {
+        upgrade_auth::initialize_upgrade_auth(&e, &admin);
+    }
+
+    pub fn grant_upgrade_auth(
+        e: Env,
+        admin: Address,
+        address: Address,
+        role: upgrade_auth::UpgradeRole,
+        expires_at: u64,
+    ) {
+        pausable::require_not_paused(&e);
+        upgrade_auth::grant_upgrade_auth(&e, &admin, &address, role, expires_at);
+    }
+
+    pub fn revoke_upgrade_auth(e: Env, admin: Address, address: Address) {
+        pausable::require_not_paused(&e);
+        upgrade_auth::revoke_upgrade_auth(&e, &admin, &address);
+    }
+
+    pub fn propose_upgrade(
+        e: Env,
+        proposer: Address,
+        new_implementation: Address,
+        upgrade_data: Bytes,
+        required_approvals: u32,
+    ) -> u64 {
+        pausable::require_not_paused(&e);
+        upgrade_auth::propose_upgrade(
+            &e,
+            &proposer,
+            &new_implementation,
+            upgrade_data,
+            required_approvals,
+        )
+    }
+
+    pub fn approve_upgrade_proposal(e: Env, approver: Address, proposal_id: u64) {
+        pausable::require_not_paused(&e);
+        upgrade_auth::approve_upgrade_proposal(&e, &approver, proposal_id);
+    }
+
+    pub fn execute_upgrade(
+        e: Env,
+        executor: Address,
+        new_implementation: Address,
+        proposal_id: Option<u64>,
+    ) {
+        pausable::require_not_paused(&e);
+        upgrade_auth::execute_upgrade(&e, &executor, &new_implementation, proposal_id);
+    }
+
+    pub fn upgrade(e: Env, executor: Address, new_wasm_hash: soroban_sdk::BytesN<32>) {
+        pausable::require_not_paused(&e);
+        executor.require_auth();
+        upgrade_auth::require_upgrade_auth(&e, &executor);
+
+        // Perform the upgrade
+        e.deployer().update_current_contract_wasm(new_wasm_hash);
+
+        // Emit event
+        e.events().publish(
+            (Symbol::new(&e, "contract_upgraded"),),
+            (executor, e.ledger().timestamp()),
+        );
+    }
+
+    pub fn get_upgrade_auth(
+        e: Env,
+        address: Address,
+    ) -> Option<upgrade_auth::UpgradeAuthorization> {
+        e.storage().instance().get(&DataKey::UpgradeAuth(address))
+    }
+
+    pub fn get_upgrade_proposal(e: Env, proposal_id: u64) -> Option<upgrade_auth::UpgradeProposal> {
+        e.storage()
+            .instance()
+            .get(&DataKey::UpgradeProposal(proposal_id))
+    }
+
+    pub fn get_upgrade_history(e: Env) -> soroban_sdk::Vec<upgrade_auth::UpgradeRecord> {
+        e.storage()
+            .instance()
+            .get(&DataKey::UpgradeHistory)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(&e))
     }
 }
 
+#[cfg(test)]
+mod fuzz;
+#[cfg(test)]
+mod integration;
+#[cfg(test)]
+mod security;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
 mod test_access_control;
 #[cfg(test)]
+mod test_attestation;
+#[cfg(test)]
+mod test_attestation_types;
+#[cfg(test)]
+mod test_batch;
+#[cfg(test)]
+mod test_cooldown;
+#[cfg(test)]
+mod test_create_bond;
+#[cfg(test)]
+mod test_decimals;
+#[cfg(test)]
+mod test_ownership_transfer;
+#[cfg(test)]
+mod test_duration_validation;
+#[cfg(test)]
+mod test_early_exit_penalty;
+#[cfg(test)]
 mod test_emergency;
 #[cfg(test)]
+mod test_events;
+#[cfg(test)]
+mod test_events_v2;
+#[cfg(test)]
+mod test_evidence;
+#[cfg(test)]
+mod test_fees;
+#[cfg(test)]
+mod test_governance_approval;
+#[cfg(test)]
+mod test_grace_period;
+#[cfg(test)]
 mod test_helpers;
+#[cfg(test)]
+mod test_immutable_config;
+#[cfg(test)]
+mod test_immutable_config_working;
+#[cfg(test)]
+mod test_increase_bond;
+#[cfg(test)]
+mod test_liquidation_scanner;
+#[cfg(test)]
+mod test_market_activation;
+#[cfg(test)]
+mod test_math;
+#[cfg(test)]
+mod test_max_leverage;
+#[cfg(test)]
+mod test_parameters;
+#[cfg(test)]
+mod test_pausable;
+#[cfg(test)]
+mod test_reentrancy;
+#[cfg(test)]
+mod test_reentrancy_bug_exploration;
+#[cfg(test)]
+mod test_reentrancy_preservation;
+#[cfg(test)]
+mod test_replay_prevention;
+#[cfg(test)]
+mod test_rolling_bond;
+#[cfg(test)]
+mod test_same_ledger_liquidation_guard;
+#[cfg(test)]
+mod test_slashing;
+#[cfg(test)]
+mod test_status_snapshot;
+#[cfg(test)]
+mod test_tiered_bond;
+#[cfg(test)]
+mod test_upgrade_auth;
+#[cfg(test)]
+mod test_validation;
+#[cfg(test)]
+mod test_verifier;
+#[cfg(test)]
+mod test_weighted_attestation;
+#[cfg(test)]
+mod test_borrow_freeze;
+#[cfg(test)]
+mod test_withdraw_bond;
+#[cfg(test)]
+mod test_zero_address;
+#[cfg(test)]
+mod test_zero_address_working;
+#[cfg(test)]
+mod token_integration_test;
+#[cfg(test)]
+mod test_ownership_transfer;

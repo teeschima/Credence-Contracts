@@ -533,7 +533,7 @@ fn test_get_dispute_not_found_panics() {
 /// due to fee-on-transfer mechanisms.
 ///
 /// # Balance-Delta Verification
-/// 
+///
 /// **create_dispute**: Verifies stake transferred IN correctly
 /// ```ignore
 /// let balance_before = token_client.balance(&contract_address);

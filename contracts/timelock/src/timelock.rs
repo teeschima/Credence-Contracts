@@ -45,6 +45,14 @@ pub enum DataKey {
     PendingChange(u64),
     /// Counter for generating unique change IDs.
     ChangeCounter,
+    Paused,
+    PauseSigner(Address),
+    PauseSignerCount,
+    PauseThreshold,
+    PauseProposalCounter,
+    PauseProposal(u64),
+    PauseApproval(u64, Address),
+    PauseApprovalCount(u64),
 }
 
 #[contract]
@@ -59,11 +67,22 @@ impl Timelock {
     /// @param governance Address that can cancel pending changes
     /// @param min_delay  Minimum delay in seconds before a change can be executed
     pub fn initialize(e: Env, admin: Address, governance: Address, min_delay: u64) {
+        if e.storage().instance().has(&DataKey::Admin) {
+            panic!("already initialized");
+        }
         admin.require_auth();
         if min_delay == 0 {
             panic!("min_delay must be greater than zero");
         }
         e.storage().instance().set(&DataKey::Admin, &admin);
+        e.storage().instance().set(&DataKey::Paused, &false);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &0_u32);
+        e.storage().instance().set(&DataKey::PauseThreshold, &0_u32);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseProposalCounter, &0_u64);
         e.storage()
             .instance()
             .set(&DataKey::GovernanceAddress, &governance);
@@ -89,6 +108,7 @@ impl Timelock {
         parameter_key: Symbol,
         new_value: i128,
     ) -> u64 {
+        crate::pausable::require_not_paused(&e);
         let min_delay: u64 = e
             .storage()
             .instance()
@@ -123,6 +143,7 @@ impl Timelock {
         new_value: i128,
         eta: u64,
     ) -> u64 {
+        crate::pausable::require_not_paused(&e);
         proposer.require_auth();
         let admin: Address = e
             .storage()
@@ -175,7 +196,7 @@ impl Timelock {
         };
 
         e.storage()
-            .instance()
+            .persistent()
             .set(&DataKey::PendingChange(id), &change);
 
         e.events().publish(
@@ -191,6 +212,7 @@ impl Timelock {
     /// @param e         The contract environment
     /// @param change_id ID of the change to execute
     pub fn execute_change(e: Env, change_id: u64) {
+        crate::pausable::require_not_paused(&e);
         let admin: Address = e
             .storage()
             .instance()
@@ -200,7 +222,7 @@ impl Timelock {
 
         let mut change: ParameterChange = e
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::PendingChange(change_id))
             .unwrap_or_else(|| panic!("change not found"));
 
@@ -213,9 +235,11 @@ impl Timelock {
 
         let now = e.ledger().timestamp();
         if now < change.eta {
+            // Early execution forbidden: must be at or after ETA.
             panic!("timelock delay has not elapsed");
         }
         if now > change.expires_at {
+            // Late execution forbidden: must be at or before expires_at.
             panic!("execution window expired");
         }
 
@@ -233,7 +257,7 @@ impl Timelock {
 
         change.executed = true;
         e.storage()
-            .instance()
+            .persistent()
             .set(&DataKey::PendingChange(change_id), &change);
 
         e.events().publish(
@@ -248,6 +272,7 @@ impl Timelock {
     /// @param canceller Must be the governance address
     /// @param change_id ID of the change to cancel
     pub fn cancel_change(e: Env, canceller: Address, change_id: u64) {
+        crate::pausable::require_not_paused(&e);
         canceller.require_auth();
         let governance: Address = e
             .storage()
@@ -260,7 +285,7 @@ impl Timelock {
 
         let mut change: ParameterChange = e
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::PendingChange(change_id))
             .unwrap_or_else(|| panic!("change not found"));
 
@@ -273,7 +298,7 @@ impl Timelock {
 
         change.cancelled = true;
         e.storage()
-            .instance()
+            .persistent()
             .set(&DataKey::PendingChange(change_id), &change);
 
         e.events().publish(
@@ -288,6 +313,7 @@ impl Timelock {
     /// @param e         The contract environment
     /// @param new_delay New minimum delay in seconds
     pub fn update_min_delay(e: Env, new_delay: u64) {
+        crate::pausable::require_not_paused(&e);
         let admin: Address = e
             .storage()
             .instance()
@@ -310,7 +336,7 @@ impl Timelock {
     /// Get a parameter change by ID.
     pub fn get_change(e: Env, change_id: u64) -> ParameterChange {
         e.storage()
-            .instance()
+            .persistent()
             .get(&DataKey::PendingChange(change_id))
             .unwrap_or_else(|| panic!("change not found"))
     }
@@ -337,5 +363,33 @@ impl Timelock {
             .instance()
             .get(&DataKey::GovernanceAddress)
             .unwrap_or_else(|| panic!("not initialized"))
+    }
+
+    pub fn pause(e: Env, caller: Address) -> Option<u64> {
+        crate::pausable::pause(&e, &caller)
+    }
+
+    pub fn unpause(e: Env, caller: Address) -> Option<u64> {
+        crate::pausable::unpause(&e, &caller)
+    }
+
+    pub fn is_paused(e: Env) -> bool {
+        crate::pausable::is_paused(&e)
+    }
+
+    pub fn set_pause_signer(e: Env, admin: Address, signer: Address, enabled: bool) {
+        crate::pausable::set_pause_signer(&e, &admin, &signer, enabled)
+    }
+
+    pub fn set_pause_threshold(e: Env, admin: Address, threshold: u32) {
+        crate::pausable::set_pause_threshold(&e, &admin, threshold)
+    }
+
+    pub fn approve_pause_proposal(e: Env, signer: Address, proposal_id: u64) {
+        crate::pausable::approve_pause_proposal(&e, &signer, proposal_id)
+    }
+
+    pub fn execute_pause_proposal(e: Env, proposal_id: u64) {
+        crate::pausable::execute_pause_proposal(&e, proposal_id)
     }
 }

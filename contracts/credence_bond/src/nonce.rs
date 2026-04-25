@@ -109,6 +109,7 @@ pub fn validate_and_consume(
 ///
 /// The `grace` parameter overrides the stored grace window for the deadline
 /// check. All other checks (domain, nonce) behave identically.
+#[allow(dead_code)]
 pub fn validate_and_consume_with_grace(
     e: &Env,
     identity: &Address,

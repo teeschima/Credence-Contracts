@@ -4,20 +4,22 @@
 /// resulting in the recipient receiving less than the transfer amount specified in the call.
 /// This test suite verifies that the bond contract properly detects and rejects such tokens
 /// to prevent accounting mismatches and value drift.
-
 use credence_bond::{CredenceBond, CredenceBondClient};
 use soroban_sdk::testutils::{Address as AddressTrait, Ledger};
 use soroban_sdk::{token::TokenClient, Address, Env, String};
 
 /// Sets up a standard bond contract with a normal token for testing.
-fn setup_with_standard_token(env: &Env) -> (CredenceBondClient<'_>, Address, Address, Address, Address) {
+fn setup_with_standard_token(
+    env: &Env,
+) -> (CredenceBondClient<'_>, Address, Address, Address, Address) {
     env.mock_all_auths();
 
     let contract_id = env.register(CredenceBond, ());
-    let client = CredenceBondClient::new(env, &contract_id);
+    let client = CredenceBondClient::new(&env, &contract_id);
 
-    let admin = Address::generate(env);
-    let user = Address::generate(env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
@@ -78,8 +80,16 @@ fn standard_token_withdrawal_works() {
 }
 
 /// Mock fee-on-transfer token behavior by simulating transfer with loss.
-// #[test]
-// #[should_panic(expected = "unsupported token: transfer amount mismatch")]
+///
+/// NOTE: In a real scenario with an actual fee-on-transfer token contract,
+/// the TokenClient.transfer() call would inherently return less than requested.
+/// This test demonstrates what the contract should detect.
+///
+/// For integration testing with an actual fee-on-transfer token contract,
+/// you would deploy a custom token contract that charges a fee and verify
+/// that the bond contract rejects the operation.
+#[test]
+#[should_panic(expected = "unsupported token: transfer amount mismatch")]
 fn bond_rejects_fee_on_transfer_token_on_create() {
     // This test demonstrates the expected panic when a fee-on-transfer token
     // is used. In practice, you would:
@@ -99,7 +109,7 @@ fn bond_rejects_fee_on_transfer_token_on_create() {
     // - Takes the full amount from the sender
     // - Only transfers (amount * 99%) to the recipient (1% fee)
     // - Stores the 1% fee in the token contract
-    
+
     let env = Env::default();
     env.mock_all_auths();
 
@@ -107,7 +117,7 @@ fn bond_rejects_fee_on_transfer_token_on_create() {
     let client = CredenceBondClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-    let user = Address::generate(&env);
+    let _user = Address::generate(&env);
 
     client.initialize(&admin);
 

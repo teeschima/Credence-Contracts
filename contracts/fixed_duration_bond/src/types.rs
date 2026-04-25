@@ -68,4 +68,12 @@ pub enum DataKey {
     Bond(Address),
     /// Accrued creation fees held in the contract, in strobes/units.
     AccruedFees,
+    Paused,
+    PauseSigner(Address),
+    PauseSignerCount,
+    PauseThreshold,
+    PauseProposalCounter,
+    PauseProposal(u64),
+    PauseApproval(u64, Address),
+    PauseApprovalCount(u64),
 }

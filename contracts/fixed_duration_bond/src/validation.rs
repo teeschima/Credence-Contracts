@@ -34,7 +34,7 @@ pub fn validate_recipient(recipient: &Address, contract: &Address) {
     if recipient == contract {
         panic!("recipient cannot be the contract itself");
     }
-    
+
     // Note: In Soroban, addresses are validated through the auth system.
     // We don't need to check for "zero address" as that concept doesn't exist.
     // The require_auth() calls in the calling code provide the primary validation.
@@ -43,6 +43,7 @@ pub fn validate_recipient(recipient: &Address, contract: &Address) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
     use soroban_sdk::{Address, Env};
     use soroban_sdk::testutils::Address as _;
 

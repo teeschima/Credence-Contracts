@@ -23,6 +23,8 @@ use errors::*;
 use types::{DataKey, FeeConfig, FixedBond, OracleSafety};
 use validation::validate_recipient;
 
+pub mod pausable;
+
 use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, Env, Symbol};
 
 #[cfg(test)]
@@ -31,11 +33,19 @@ mod test_helpers;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod test_pausable;
+
 /// Maximum fee in basis points (1000 = 10%).
 pub const MAX_FEE_BPS: u32 = 1000;
 /// Default staleness window for oracle answers (seconds) when no per-asset
 /// override is configured. Default to 1 hour.
 pub const DEFAULT_MAX_STALENESS: u64 = 3600;
+/// Minimum allowed fixed-duration bond lock period (seconds).
+pub const MIN_BOND_DURATION_SECS: u64 = 1;
+/// Maximum allowed fixed-duration bond lock period (seconds).
+/// Bound to one year to avoid unreasonably long locks.
+pub const MAX_BOND_DURATION_SECS: u64 = 365 * 86_400;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -78,14 +88,10 @@ fn apply_bps(amount: i128, bps: u32) -> (i128, i128) {
 
 /// Verify balance-delta for token transfer to reject fee-on-transfer tokens.
 /// Call before performing transfer_from to verify received amount.
-/// 
+///
 /// # Panics
 /// If balance increased by less than expected amount after transfer_from.
-fn verify_transfer_in(
-    token_client: &TokenClient,
-    contract: &Address,
-    expected_amount: i128,
-) {
+fn verify_transfer_in(token_client: &TokenClient, contract: &Address, expected_amount: i128) {
     let balance_before = token_client.balance(contract);
     let balance_after = token_client.balance(contract);
     let actual_received = balance_after
@@ -99,7 +105,7 @@ fn verify_transfer_in(
 
 /// Verify balance-delta for token transfer to reject fee-on-transfer tokens.
 /// Call after performing transfer to verify sent amount.
-/// 
+///
 /// # Panics
 /// If balance decreased by less than expected amount after transfer.
 fn verify_transfer_out(
@@ -194,12 +200,21 @@ impl FixedDurationBond {
             panic!("{}", ERR_ALREADY_INITIALIZED);
         }
         e.storage().instance().set(&DataKey::Admin, &admin);
+        e.storage().instance().set(&DataKey::Paused, &false);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &0_u32);
+        e.storage().instance().set(&DataKey::PauseThreshold, &0_u32);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseProposalCounter, &0_u64);
         e.storage().instance().set(&DataKey::Token, &token);
     }
 
     /// Set (or update) the optional bond-creation fee.
     /// `fee_bps` = 0 effectively disables the fee.
     pub fn set_fee_config(e: Env, admin: Address, treasury: Address, fee_bps: u32) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         if fee_bps > MAX_FEE_BPS {
             panic!("{}", ERR_FEE_BPS_TOO_HIGH);
@@ -223,6 +238,7 @@ impl FixedDurationBond {
     /// Set the default early-exit penalty applied when `withdraw_early` is called.
     /// Pass 0 to disable early-exit withdrawal for newly created bonds.
     pub fn set_penalty_config(e: Env, admin: Address, base_penalty_bps: u32) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         e.storage()
             .instance()
@@ -241,6 +257,7 @@ impl FixedDurationBond {
         min_answer: i128,
         max_answer: i128,
     ) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         if min_answer <= 0 || max_answer < min_answer {
             panic!("{}", ERR_ORACLE_BOUNDS_INVALID);
@@ -260,44 +277,42 @@ impl FixedDurationBond {
 
     /// Enable or disable the receiver allowlist. Default is disabled.
     pub fn set_receiver_allowlist_enabled(e: Env, admin: Address, enabled: bool) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         e.storage()
             .instance()
             .set(&DataKey::ReceiverAllowlistEnabled, &enabled);
-        e.events().publish(
-            (Symbol::new(&e, "receiver_allowlist_toggled"),),
-            (enabled,),
-        );
+        e.events()
+            .publish((Symbol::new(&e, "receiver_allowlist_toggled"),), (enabled,));
     }
 
     /// Allow a receiver address to receive protocol-controlled funds when the
     /// allowlist is enabled.
     pub fn allow_receiver(e: Env, admin: Address, receiver: Address) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         e.storage()
             .instance()
             .set(&DataKey::ReceiverAllowlist(receiver.clone()), &true);
-        e.events().publish(
-            (Symbol::new(&e, "receiver_allowed"),),
-            (receiver,),
-        );
+        e.events()
+            .publish((Symbol::new(&e, "receiver_allowed"),), (receiver,));
     }
 
     /// Revoke an allowed receiver.
     pub fn revoke_receiver(e: Env, admin: Address, receiver: Address) {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         e.storage()
             .instance()
             .set(&DataKey::ReceiverAllowlist(receiver.clone()), &false);
-        e.events().publish(
-            (Symbol::new(&e, "receiver_revoked"),),
-            (receiver,),
-        );
+        e.events()
+            .publish((Symbol::new(&e, "receiver_revoked"),), (receiver,));
     }
 
     /// Collect all accrued creation fees to the admin or treasury.
     /// Transfers the fee balance to `recipient` and resets the counter.
     pub fn collect_fees(e: Env, admin: Address, recipient: Address) -> i128 {
+        pausable::require_not_paused(&e);
         require_admin(&e, &admin);
         let accrued: i128 = e
             .storage()
@@ -315,10 +330,10 @@ impl FixedDurationBond {
 
         let token = get_token(&e);
         let contract = e.current_contract_address();
-        
+
         // Validate recipient to prevent transfers to invalid addresses
         validate_recipient(&recipient, &contract);
-        
+
         TokenClient::new(&e, &token).transfer(&contract, &recipient, &accrued);
 
         e.events().publish(
@@ -353,9 +368,8 @@ impl FixedDurationBond {
             .unwrap_or_else(|| panic!("{}", ERR_ORACLE_SAFETY_NOT_SET));
         
         validate_oracle_answer(oracle_answer, &safety);
-
-        let max_staleness = get_max_staleness(&e, &asset);
         let now = e.ledger().timestamp();
+        let max_staleness = get_max_staleness(&e, &asset);
         validate_oracle(
             oracle_answer,
             updated_at,
@@ -364,7 +378,6 @@ impl FixedDurationBond {
             max_staleness,
             now,
         );
-
         mul_i128(amount, oracle_answer, ERR_VALUATION_OVERFLOW)
     }
 
@@ -374,13 +387,14 @@ impl FixedDurationBond {
     ///
     /// Requirements:
     /// - `amount` > 0
-    /// - `duration_secs` > 0
+    /// - `duration_secs` is within `[MIN_BOND_DURATION_SECS, MAX_BOND_DURATION_SECS]`
     /// - No currently active bond for `owner`
     /// - Caller has approved the contract to spend `amount`
     ///
     /// A creation fee (if configured) is deducted from `amount`; the remaining
     /// principal is stored as `FixedBond.amount`.
     pub fn create_bond(e: Env, owner: Address, amount: i128, duration_secs: u64) -> FixedBond {
+        pausable::require_not_paused(&e);
         owner.require_auth();
 
         if amount <= 0 {
@@ -388,6 +402,9 @@ impl FixedDurationBond {
         }
         if duration_secs == 0 {
             panic!("{}", ERR_INVALID_DURATION);
+        }
+        if !(MIN_BOND_DURATION_SECS..=MAX_BOND_DURATION_SECS).contains(&duration_secs) {
+            panic!("{}", ERR_DURATION_OUT_OF_BOUNDS);
         }
 
         // Reject if owner already has an active bond.
@@ -413,7 +430,7 @@ impl FixedDurationBond {
 
         // Check balance before transfer to detect fee-on-transfer tokens
         let balance_before = token_client.balance(&contract);
-        
+
         token_client.transfer_from(&contract, &owner, &contract, &amount);
 
         // Verify balance increased by exactly the expected amount
@@ -484,6 +501,7 @@ impl FixedDurationBond {
     /// Panics if there is no active bond or the lock period has not yet elapsed.
     /// Deactivates the bond after successful transfer.
     pub fn withdraw(e: Env, owner: Address) -> FixedBond {
+        pausable::require_not_paused(&e);
         owner.require_auth();
 
         let mut bond: FixedBond = e
@@ -513,7 +531,7 @@ impl FixedDurationBond {
 
         // Check balance before transfer to detect fee-on-transfer tokens
         let balance_before = token_client.balance(&contract);
-        
+
         token_client.transfer(&contract, &owner, &bond.amount);
 
         // Verify balance decreased by exactly the expected amount
@@ -542,6 +560,7 @@ impl FixedDurationBond {
     /// Net amount = `bond.amount - penalty`. Penalty goes to the configured
     /// treasury; if no fee config is set, the penalty is burned (not transferred).
     pub fn withdraw_early(e: Env, owner: Address) -> FixedBond {
+        pausable::require_not_paused(&e);
         owner.require_auth();
 
         let mut bond: FixedBond = e
@@ -634,6 +653,34 @@ impl FixedDurationBond {
             .get(&DataKey::Bond(owner))
             .unwrap_or_else(|| panic!("{}", ERR_NO_BOND));
         e.ledger().timestamp() >= bond.bond_expiry
+    }
+
+    pub fn pause(e: Env, caller: Address) -> Option<u64> {
+        pausable::pause(&e, &caller)
+    }
+
+    pub fn unpause(e: Env, caller: Address) -> Option<u64> {
+        pausable::unpause(&e, &caller)
+    }
+
+    pub fn is_paused(e: Env) -> bool {
+        pausable::is_paused(&e)
+    }
+
+    pub fn set_pause_signer(e: Env, admin: Address, signer: Address, enabled: bool) {
+        pausable::set_pause_signer(&e, &admin, &signer, enabled)
+    }
+
+    pub fn set_pause_threshold(e: Env, admin: Address, threshold: u32) {
+        pausable::set_pause_threshold(&e, &admin, threshold)
+    }
+
+    pub fn approve_pause_proposal(e: Env, signer: Address, proposal_id: u64) {
+        pausable::approve_pause_proposal(&e, &signer, proposal_id)
+    }
+
+    pub fn execute_pause_proposal(e: Env, proposal_id: u64) {
+        pausable::execute_pause_proposal(&e, proposal_id)
     }
 
     /// Returns the number of seconds remaining until maturity.

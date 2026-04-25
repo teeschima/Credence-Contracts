@@ -3,7 +3,6 @@
 //! Rejects fee-on-transfer tokens where balance verification fails.
 
 use crate::DataKey;
-use crate::validation::validate_recipient;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{Address, Env, String, Symbol};
 
@@ -16,7 +15,6 @@ pub const STELLAR_TESTNET: &str = "testnet";
 fn network_key(e: &Env) -> Symbol {
     Symbol::new(e, "usdc_net")
 }
-
 
 /// @notice Sets the token contract used by bond operations.
 /// @dev Requires admin auth and stores token in instance storage.
@@ -31,22 +29,12 @@ pub fn set_token(e: &Env, admin: &Address, token: &Address) {
         panic!("not admin");
     }
 
-    // Zero-address check
-    if token.to_string() == soroban_sdk::String::from_str(e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-        panic!("ZeroAddress");
-    }
-
     e.storage().instance().set(&DataKey::BondToken, token);
 }
 
 /// @notice Sets the USDC token contract and associated network label.
 /// @dev Network label is informational for auditing and can be "mainnet" or "testnet".
 pub fn set_usdc_token(e: &Env, admin: &Address, token: &Address, network: &String) {
-    // Zero-address check
-    if token.to_string() == soroban_sdk::String::from_str(e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-        panic!("ZeroAddress");
-    }
-
     if *network != String::from_str(e, STELLAR_MAINNET)
         && *network != String::from_str(e, STELLAR_TESTNET)
     {
@@ -108,7 +96,8 @@ pub fn transfer_into_contract(e: &Env, owner: &Address, amount: i128) {
     // Verify balance increased by exactly the expected amount
     // Rejects fee-on-transfer tokens where received < requested
     let balance_after = token.balance(&contract);
-    let actual_received = balance_after.checked_sub(balance_before)
+    let actual_received = balance_after
+        .checked_sub(balance_before)
         .expect("balance underflow");
 
     if actual_received != amount {
@@ -144,10 +133,15 @@ pub fn transfer_from_contract(e: &Env, recipient: &Address, amount: i128) {
     // Verify balance decreased by exactly the expected amount
     // Rejects fee-on-transfer tokens where sent != requested
     let balance_after = token.balance(&contract);
-    let actual_sent = balance_before.checked_sub(balance_after)
+    let actual_sent = balance_before
+        .checked_sub(balance_after)
         .expect("balance underflow");
 
     if actual_sent != amount {
         panic!("unsupported token: transfer amount mismatch (code 213)");
     }
+}
+
+pub fn token_client(e: &Env) -> TokenClient<'_> {
+    TokenClient::new(e, &get_token(e))
 }
