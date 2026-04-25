@@ -1497,11 +1497,6 @@ impl CredenceBond {
         })
     }
 
-    pub fn top_up(e: Env, amount: i128) -> IdentityBond {
-        let bond = Self::get_bond(e.clone());
-        Self::increase_bond(e, bond.identity, amount)
-    }
-
     pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
         pausable::require_not_paused(&e);
         let key = DataKey::Bond;
