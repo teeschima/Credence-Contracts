@@ -943,6 +943,8 @@ impl CredenceBond {
         pausable::require_not_paused(&e);
         // Ensure bond is active before allowing withdrawal
         Self::require_active_bond(&e);
+        // Reentrancy guard: must be acquired before any state reads or external calls.
+        Self::acquire_lock(&e);
 
         let key = DataKey::Bond;
         let mut bond = e
@@ -985,7 +987,8 @@ impl CredenceBond {
             Self::release_lock(&e);
             panic!("insufficient balance for withdrawal");
         }
-        token_integration::transfer_from_contract(&e, &bond.identity, amount);
+
+        // EFFECTS: commit all state changes before any external interaction.
         let old_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         bond.bonded_amount = bond.bonded_amount.checked_sub(amount).expect("underflow");
         if bond.slashed_amount > bond.bonded_amount {
@@ -1018,6 +1021,19 @@ impl CredenceBond {
             0,
         );
 
+        // INTERACTIONS: external calls after state is committed.
+        // Invoke callback so observers are notified; reentrancy is blocked by the held lock.
+        let cb_key = Symbol::new(&e, "callback");
+        if let Some(cb_addr) = e.storage().instance().get::<_, Address>(&cb_key) {
+            let fn_name = Symbol::new(&e, "on_withdraw");
+            let args: Vec<Val> = Vec::from_array(&e, [amount.into_val(&e)]);
+            e.invoke_contract::<Val>(&cb_addr, &fn_name, args);
+        }
+
+        // Token transfer is the final external call after all state is settled.
+        token_integration::transfer_from_contract(&e, &bond.identity, amount);
+
+        Self::release_lock(&e);
         bond
     }
 
@@ -1059,33 +1075,9 @@ impl CredenceBond {
         );
         early_exit_penalty::emit_penalty_event(&e, &bond.identity, amount, penalty, &treasury);
 
-        // Calculate net amount and transfer to user
         let net_amount = amount.checked_sub(penalty).expect("penalty exceeds amount");
-        token_integration::transfer_from_contract(&e, &bond.identity, net_amount);
 
-        // Instead of transferring penalty to treasury immediately,
-        // add a potential penalty refund claim for good behavior
-        if penalty > 0 {
-            // Transfer penalty to treasury (still push-based for treasury)
-            token_integration::transfer_from_contract(&e, &treasury, penalty);
-
-            // Add a potential penalty refund claim (50% of penalty can be refunded for good behavior)
-            let refund_amount = penalty / 2;
-            if refund_amount > 0 {
-                // Get next penalty ID for tracking
-                let penalty_id = Self::get_next_penalty_id(&e);
-
-                claims::add_pending_claim(
-                    &e,
-                    &bond.identity,
-                    claims::ClaimType::PenaltyRefund,
-                    refund_amount,
-                    penalty_id,
-                    Some(Symbol::new(&e, "early_exit_refund")),
-                );
-            }
-        }
-
+        // EFFECTS: commit all state changes before any external interaction.
         let old_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         bond.bonded_amount = bond.bonded_amount.checked_sub(amount).expect("underflow");
         if bond.slashed_amount > bond.bonded_amount {
@@ -1119,6 +1111,42 @@ impl CredenceBond {
             penalty,
         );
 
+        // INTERACTIONS: external calls after all state is committed.
+        // Invoke callback so observers are notified; reentrancy is blocked by the held lock.
+        let cb_key = Symbol::new(&e, "callback");
+        if let Some(cb_addr) = e.storage().instance().get::<_, Address>(&cb_key) {
+            let fn_name = Symbol::new(&e, "on_withdraw");
+            let args: Vec<Val> = Vec::from_array(&e, [amount.into_val(&e)]);
+            e.invoke_contract::<Val>(&cb_addr, &fn_name, args);
+        }
+
+        // Token transfers are the final external calls after state is settled.
+        token_integration::transfer_from_contract(&e, &bond.identity, net_amount);
+
+        // Instead of transferring penalty to treasury immediately,
+        // add a potential penalty refund claim for good behavior
+        if penalty > 0 {
+            // Transfer penalty to treasury (still push-based for treasury)
+            token_integration::transfer_from_contract(&e, &treasury, penalty);
+
+            // Add a potential penalty refund claim (50% of penalty can be refunded for good behavior)
+            let refund_amount = penalty / 2;
+            if refund_amount > 0 {
+                // Get next penalty ID for tracking
+                let penalty_id = Self::get_next_penalty_id(&e);
+
+                claims::add_pending_claim(
+                    &e,
+                    &bond.identity,
+                    claims::ClaimType::PenaltyRefund,
+                    refund_amount,
+                    penalty_id,
+                    Some(Symbol::new(&e, "early_exit_refund")),
+                );
+            }
+        }
+
+        Self::release_lock(&e);
         bond
     }
 
@@ -1262,8 +1290,10 @@ impl CredenceBond {
         e.storage().instance().set(&key, &next);
     }
 
-    pub fn set_callback(e: Env, callback: Address) {
+    pub fn set_callback(e: Env, admin: Address, callback: Address) {
         pausable::require_not_paused(&e);
+        admin.require_auth();
+        Self::require_admin_internal(&e, &admin);
         e.storage()
             .instance()
             .set(&Self::callback_key(&e), &callback);
@@ -1698,6 +1728,16 @@ impl CredenceBond {
         e.storage().instance().set(&bond_key, &bond);
         e.storage().instance().remove(&req_key);
         cooldown::emit_cooldown_executed(&e, &requester, request.amount);
+
+        // INTERACTIONS: invoke callback after all state is committed.
+        // Reentrancy is blocked by the held lock.
+        let cb_key = Symbol::new(&e, "callback");
+        if let Some(cb_addr) = e.storage().instance().get::<_, Address>(&cb_key) {
+            let fn_name = Symbol::new(&e, "on_withdraw");
+            let args: Vec<Val> = Vec::from_array(&e, [request.amount.into_val(&e)]);
+            e.invoke_contract::<Val>(&cb_addr, &fn_name, args);
+        }
+
         Self::release_lock(&e);
         bond
     }

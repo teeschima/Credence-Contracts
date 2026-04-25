@@ -6,6 +6,8 @@ This document describes the reentrancy attack vectors relevant to the Credence B
 
 For other security topics (including overflow-safe arithmetic for financial calculations), see `docs/security.md`.
 
+> **Last updated**: security/bond-reentrancy-hardening-fresh — hardened state-update ordering across `withdraw_bond`, `withdraw_early`, and `execute_cooldown_withdrawal`; restricted `set_callback` to admin only; added 8 attacker-harness regression tests.
+
 ## Reentrancy in Soroban vs EVM
 
 Unlike EVM-based contracts (Solidity), Soroban smart contracts on Stellar benefit from **runtime-level reentrancy protection**. The Soroban VM prevents a contract from being re-entered while it is already executing — any cross-contract call that attempts to invoke the originating contract will fail with:
@@ -37,18 +39,39 @@ The guard uses a boolean `locked` flag in instance storage:
 
 ### Protected Functions
 
-All three external-call-bearing functions use the guard:
+All external-call-bearing functions use the guard:
 
-1. **`withdraw_bond()`** — Withdraws bonded amount to identity
-2. **`slash_bond()`** — Admin slashes a portion of a bond
-3. **`collect_fees()`** — Admin collects accumulated protocol fees
+| Function | Lock status | Callback |
+|----------|-------------|---------|
+| `withdraw_bond_full()` | ✅ guarded | `on_withdraw` |
+| `withdraw_bond()` | ✅ guarded (hardened) | `on_withdraw` |
+| `withdraw_early()` | ✅ guarded | `on_withdraw` |
+| `execute_cooldown_withdrawal()` | ✅ guarded | `on_withdraw` |
+| `slash_bond()` | ✅ guarded | `on_slash` |
+| `collect_fees()` | ✅ guarded | `on_collect` |
 
-Each function follows the **checks-effects-interactions** pattern:
+Each function follows the **checks-effects-interactions** (CEI) pattern:
 1. Acquire reentrancy lock
-2. Validate inputs and authorization
-3. Update state (effects) **before** any external call
-4. Perform external call (invoke callback)
-5. Release reentrancy lock
+2. Validate inputs and authorization (Checks)
+3. Update state (Effects) **before** any external call
+4. Invoke callback (Interaction — blocked by held lock if re-entered)
+5. Perform token transfer (Interaction — final external call)
+6. Release reentrancy lock
+
+### Hardening: CEI Fixes (2026-04)
+
+Three functions previously violated CEI by calling `token_integration::transfer_from_contract`
+**before** committing state updates. A malicious token or callback registered as the contract
+callback could have exploited this ordering to observe or re-enter the contract in an
+intermediate state.
+
+| Function | Before fix | After fix |
+|----------|-----------|----------|
+| `withdraw_bond()` | Transfer → state update | State update → callback → transfer ✅ |
+| `withdraw_early()` | Transfer → state update | State update → callback → transfer ✅ |
+| `execute_cooldown_withdrawal()` | State update ✅ | Added `on_withdraw` callback after state ✅ |
+
+`withdraw_bond()` also lacked a reentrancy guard entirely before this fix.
 
 ## Attack Vectors Tested
 
@@ -80,9 +103,9 @@ Multiple guarded operations called in sequence (slash → collect fees → withd
 
 | # | Test | Type | Result |
 |---|------|------|--------|
-| 1 | `test_withdraw_reentrancy_blocked` | Same-function reentrancy | PASS (blocked) |
-| 2 | `test_slash_reentrancy_blocked` | Same-function reentrancy | PASS (blocked) |
-| 3 | `test_fee_collection_reentrancy_blocked` | Same-function reentrancy | PASS (blocked) |
+| 1 | `test_withdraw_reentrancy_blocked` | Same-function reentrancy (`withdraw_bond_full`) | PASS (blocked) |
+| 2 | `test_slash_reentrancy_blocked` | Same-function reentrancy (`slash_bond`) | PASS (blocked) |
+| 3 | `test_fee_collection_reentrancy_blocked` | Same-function reentrancy (`collect_fees`) | PASS (blocked) |
 | 4 | `test_lock_not_held_initially` | State lock verification | PASS |
 | 5 | `test_lock_released_after_withdraw` | State lock verification | PASS |
 | 6 | `test_lock_released_after_slash` | State lock verification | PASS |
@@ -95,8 +118,15 @@ Multiple guarded operations called in sequence (slash → collect fees → withd
 | 13 | `test_withdraw_non_owner_rejected` | Authorization | PASS |
 | 14 | `test_double_withdraw_rejected` | State transition | PASS |
 | 15 | `test_cross_function_reentrancy_blocked` | Cross-function reentrancy | PASS |
+| 16 | `test_partial_withdraw_reentrancy_blocked` | Same-function reentrancy (`withdraw_bond`) — **new** | PASS (blocked) |
+| 17 | `test_withdraw_early_reentrancy_blocked` | Same-function reentrancy (`withdraw_early`) — **new** | PASS (blocked) |
+| 18 | `test_cooldown_withdrawal_reentrancy_blocked` | Same-function reentrancy (`execute_cooldown_withdrawal`) — **new** | PASS (blocked) |
+| 19 | `test_set_callback_non_admin_rejected` | Admin gate on `set_callback` — **new** | PASS |
+| 20 | `test_state_committed_before_callback_withdraw_bond` | CEI ordering (`withdraw_bond`) — **new** | PASS |
+| 21 | `test_state_committed_before_callback_slash` | CEI ordering (`slash_bond`) — **new** | PASS |
+| 22 | `test_lock_released_after_partial_withdraw` | State lock verification (`withdraw_bond`) — **new** | PASS |
 
-**All 15 reentrancy-specific tests + 1 existing test = 16 tests passing.**
+**22 reentrancy-specific regression tests.**
 
 ## Malicious Contract Mocks
 
@@ -116,8 +146,10 @@ Five attacker/mock contracts were created for testing:
 
 ## Recommendations
 
-1. **Keep the application-level guard** — defense-in-depth is a security best practice
-2. **Maintain checks-effects-interactions ordering** — state updates before external calls
-3. **Restrict `set_callback`** — in production, only admin should be able to set callback addresses
-4. **Add access control to `deposit_fees`** — currently unrestricted
-5. **Consider event emission** — emit events on withdrawal, slashing, and fee collection for auditability
+| # | Recommendation | Status |
+|---|---------------|--------|
+| 1 | Keep the application-level guard — defense-in-depth | ✅ Done |
+| 2 | Maintain CEI ordering — state updates before external calls | ✅ Done (hardened `withdraw_bond`, `withdraw_early`) |
+| 3 | Restrict `set_callback` to admin only | ✅ Done — signature is now `set_callback(admin, callback)` |
+| 4 | Add access control to `deposit_fees` | ⚠️ Open — currently unrestricted |
+| 5 | Emit events on withdrawal/slash/fee-collect | ⚠️ Open — events are emitted via `emit_bond_withdrawn` but not for every path |
