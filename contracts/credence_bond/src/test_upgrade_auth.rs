@@ -1,3 +1,4 @@
+extern crate std;
 use crate::{
     upgrade_auth::{
         self, UpgradeAuthorization, UpgradeProposal, UpgradeRecord, UpgradeRole, UpgradeStatus,

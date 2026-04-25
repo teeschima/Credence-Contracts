@@ -129,6 +129,7 @@ pub enum DataKey {
     BondToken,
     GraceWindow, // FIX 1: added for configurable post-expiry grace window
     // Upgrade authorization storage keys
+    TotalSupply,
     UpgradeAuth(Address),
     AuthorizedUpgraders,
     Implementation,
@@ -145,6 +146,9 @@ pub enum DataKey {
     // Borrow freeze
     BorrowFrozen,
 }
+
+/// Maximum number of bonds that can be created in a single batch.
+pub const MAX_BATCH_BOND_SIZE: u32 = 100;
 
 #[contract]
 pub struct CredenceBond;
@@ -338,6 +342,28 @@ impl CredenceBond {
             panic!("ZeroAddress");
         }
 
+        let old_cfg = e.storage().instance().get::<_, emergency::EmergencyConfig>(&Symbol::new(&e, "emergency_config"));
+        
+        // Always set config with requested params, but if it's the first time and enabled=true,
+        // we'll set it to false first then enable it via set_enabled to trigger audit trail.
+        let effective_enabled = if old_cfg.is_none() { false } else { old_cfg.as_ref().unwrap().enabled };
+        
+        emergency::set_config(&e, governance.clone(), treasury.clone(), emergency_fee_bps, effective_enabled);
+
+        if let Some(old) = old_cfg {
+            if old.enabled != enabled {
+                let reason = Symbol::new(&e, "ConfigUpdate");
+                emergency::set_enabled(&e, enabled, &admin, &governance, reason.clone());
+                emergency::emit_emergency_mode_event(&e, enabled, &admin, &governance, &reason);
+            }
+        } else if enabled {
+            // First time setup and enabled=true requested
+            let reason = Symbol::new(&e, "InitialSetup");
+            emergency::set_enabled(&e, enabled, &admin, &governance, reason.clone());
+            emergency::emit_emergency_mode_event(&e, enabled, &admin, &governance, &reason);
+        }
+
+        // Final sync of config in case set_enabled was not called or we need to update other params
         emergency::set_config(&e, governance, treasury, emergency_fee_bps, enabled);
     }
 
@@ -350,8 +376,8 @@ impl CredenceBond {
         }
         admin.require_auth();
         governance.require_auth();
-        emergency::set_enabled(&e, enabled);
-        emergency::emit_emergency_mode_event(&e, enabled, &admin, &governance);
+        emergency::set_enabled(&e, enabled, &admin, &governance, reason.clone());
+        emergency::emit_emergency_mode_event(&e, enabled, &admin, &governance, &reason);
     }
 
     pub fn emergency_withdraw(
@@ -874,7 +900,7 @@ impl CredenceBond {
         nonce::get_nonce(&e, &identity)
     }
 
-    // ── Market Activation Validation ──────────────────────────────────────────────────────────
+    // ΓöÇΓöÇ Market Activation Validation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     /// Validates all required parameters before bond activation.
     ///
@@ -997,7 +1023,7 @@ impl CredenceBond {
         }
     }
 
-    // ── Grace window ──────────────────────────────────────────────────────────
+    // ΓöÇΓöÇ Grace window ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     /// Set the post-deadline grace window (in seconds). Only admin can call.
     /// A value of 0 restores strict enforcement (default behaviour).
@@ -1018,7 +1044,7 @@ impl CredenceBond {
             .unwrap_or(0u64)
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     pub fn set_attester_stake(e: Env, admin: Address, attester: Address, amount: i128) {
         pausable::require_not_paused(&e);
@@ -1088,6 +1114,9 @@ impl CredenceBond {
         }
         let old_tier = tiered_bond::get_tier_for_amount(bond.bonded_amount);
         bond.bonded_amount = bond.bonded_amount.checked_sub(amount).expect("underflow");
+        if bond.bonded_amount == 0 {
+            bond.active = false;
+        }
         if bond.slashed_amount > bond.bonded_amount {
             Self::release_lock(&e);
             panic!("slashed amount exceeds bonded amount");
@@ -1392,6 +1421,13 @@ impl CredenceBond {
         Self::require_admin_internal(&e, &admin);
         e.storage().instance().set(&DataKey::BondToken, &token);
     }
+    pub fn get_bond(e: Env) -> IdentityBond {
+        e.storage()
+            .instance()
+            .get(&DataKey::Bond)
+            .unwrap_or_else(|| panic!("no bond"))
+    }
+
     pub fn get_bond_token(e: Env) -> Option<Address> {
         e.storage().instance().get(&DataKey::BondToken)
     }
@@ -1459,6 +1495,11 @@ impl CredenceBond {
             );
             bond
         })
+    }
+
+    pub fn top_up(e: Env, amount: i128) -> IdentityBond {
+        let bond = Self::get_bond(e.clone());
+        Self::increase_bond(e, bond.identity, amount)
     }
 
     pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
@@ -1904,10 +1945,7 @@ impl CredenceBond {
     pub fn cleanup_expired_claims(e: Env, user: Address) -> u32 {
         claims::cleanup_expired_claims(&e, &user)
     }
-}
-// Pause mechanism entrypoints
-#[contractimpl]
-impl CredenceBond {
+
     pub fn is_paused(e: Env) -> bool {
         pausable::is_paused(&e)
     }

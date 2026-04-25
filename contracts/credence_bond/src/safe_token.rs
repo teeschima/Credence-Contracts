@@ -208,6 +208,7 @@ pub fn force_approve(e: &Env, spender: &Address, amount: i128) {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
     use soroban_sdk::{testutils::Address as TestAddress, Address, Env};
 
