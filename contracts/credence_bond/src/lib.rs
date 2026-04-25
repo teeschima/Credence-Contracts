@@ -1147,10 +1147,6 @@ impl CredenceBond {
             0,
         );
         
-        // External call after all state updates (CEI pattern)
-        token_integration::transfer_from_contract(&e, &bond.identity, amount);
-        Self::release_lock(&e);
-
         // INTERACTIONS: external calls after state is committed.
         // Invoke callback so observers are notified; reentrancy is blocked by the held lock.
         let cb_key = Symbol::new(&e, "callback");

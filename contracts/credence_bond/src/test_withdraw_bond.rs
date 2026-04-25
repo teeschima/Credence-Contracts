@@ -6,12 +6,57 @@ use crate::test_helpers;
 use crate::CredenceBondClient;
 use soroban_sdk::testutils::Ledger;
 use soroban_sdk::token::TokenClient;
-use soroban_sdk::{Address, Env};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use soroban_sdk::{contract, contractimpl, Address, Env};
 
 fn setup_with_token(e: &Env) -> (CredenceBondClient<'_>, Address, Address, Address, Address) {
     test_helpers::setup_with_token(e)
 }
 
+
+mod failing_withdraw_callback {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl, Env};
+
+    #[contract]
+    pub struct FailingWithdrawCallback;
+
+    #[contractimpl]
+    impl FailingWithdrawCallback {
+        pub fn on_withdraw(_e: Env, _amount: i128) {
+            panic!("callback failed");
+        }
+    }
+}
+
+#[test]
+fn test_withdraw_bond_callback_failure_reverts_state() {
+    let e = Env::default();
+    e.ledger().with_mut(|li| li.timestamp = 1000);
+    let (client, admin, identity, token_id, bond_contract_id) = setup_with_token(&e);
+
+    client.create_bond_with_rolling(&identity, &1000_i128, &86400_u64, &false, &0_u64);
+    e.ledger().with_mut(|li| li.timestamp = 87401);
+
+    let callback_id = e.register(failing_withdraw_callback::FailingWithdrawCallback, ());
+    client.set_callback(&admin, &callback_id);
+
+    let before_bond = client.get_identity_state();
+    let token_client = TokenClient::new(&e, &token_id);
+    let before_identity_balance = token_client.balance(&identity);
+    let before_contract_balance = token_client.balance(&bond_contract_id);
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        client.withdraw_bond(&500);
+    }));
+    assert!(result.is_err());
+
+    let after_bond = client.get_identity_state();
+    assert_eq!(after_bond.bonded_amount, before_bond.bonded_amount);
+    assert_eq!(after_bond.slashed_amount, before_bond.slashed_amount);
+    assert_eq!(token_client.balance(&identity), before_identity_balance);
+    assert_eq!(token_client.balance(&bond_contract_id), before_contract_balance);
+}
 #[test]
 fn test_withdraw_bond_after_lockup_non_rolling() {
     let e = Env::default();
