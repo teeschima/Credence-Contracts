@@ -450,7 +450,7 @@ fn test_emergency_withdraw_unauthorized_governance() {
 #[should_panic(expected = "InvalidAction")]
 fn test_register_attester_unauthorized() {
     let e = Env::default();
-    let (client, _, unauthorized) = setup_main_contract(&e);
+    let (client, _, _unauthorized) = setup_main_contract(&e);
     let attester = Address::generate(&e);
 
     client.register_attester(&attester);
@@ -461,7 +461,7 @@ fn test_register_attester_unauthorized() {
 #[should_panic(expected = "InvalidAction")]
 fn test_unregister_attester_unauthorized() {
     let e = Env::default();
-    let (client, _, unauthorized) = setup_main_contract(&e);
+    let (client, _, _unauthorized) = setup_main_contract(&e);
     let attester = Address::generate(&e);
 
     client.unregister_attester(&attester);

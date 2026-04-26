@@ -208,7 +208,7 @@ fn test_v2_event_indexing_improvements() {
     let increase_topic_added = i128::from_val(&e, &new_increase_event.1.get(2).unwrap());
     let increase_topic_total = i128::from_val(&e, &new_increase_event.1.get(3).unwrap());
     let increase_topic_timestamp = u64::from_val(&e, &new_increase_event.1.get(4).unwrap());
-    let increase_data = <(bool, crate::BondTier)>::from_val(&e, &new_increase_event.2);
+    let _increase_data = <(bool, crate::BondTier)>::from_val(&e, &new_increase_event.2);
 
     assert_eq!(increase_topic_name, Symbol::new(&e, "bond_increased_v2"));
     assert_eq!(increase_topic_ident, identity);

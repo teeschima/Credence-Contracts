@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn test_validate_amount() {
-        let env = Env::default();
+        let _env = Env::default();
 
         // Valid amounts
         validate_amount(0);

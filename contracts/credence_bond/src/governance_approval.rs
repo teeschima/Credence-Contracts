@@ -75,7 +75,7 @@ pub fn initialize_governance(
     min_governors: u32,
 ) {
     if quorum_bps > BPS_DENOMINATOR as u32 {
-        panic!("quorum_bps must be <= 10000");
+        panic!("quorum_bps must be <= {}", BPS_DENOMINATOR);
     }
     e.storage().instance().set(&key_governors(), &governors);
     e.storage().instance().set(&key_quorum_bps(), &quorum_bps);
@@ -200,7 +200,7 @@ pub fn is_approved(e: &Env, proposal_id: u64) -> bool {
         .instance()
         .get(&key_governors())
         .unwrap_or(Vec::new(e));
-    let total = governors.len() as u32;
+    let total = governors.len();
     if total == 0 {
         return false;
     }

@@ -7,6 +7,71 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, Address, Bytes, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub enum UpgradeKey {
+    Auth(Address),
+    AuthorizedUpgraders,
+    Implementation,
+    Admin,
+    PndgAdmin,
+    PndgUpgrAdmin,
+    Proposal(u64),
+    NextProposalId,
+    History,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Admin,
+    Bond,
+    Attester(Address),
+    Attestation(u64),
+    AttestationCounter,
+    SubjectAttestations(Address),
+    SubjectAttestationCount(Address),
+    DuplicateCheck(Address, Address, String),
+    /// Per-identity nonce for replay prevention.
+    Nonce(Address),
+    AttesterStake(Address),
+    CooldownReq(Address),
+    GovernanceNextProposalId,
+    GovernanceProposal(u64),
+    GovernanceVote(u64, Address),
+    GovernanceDelegate(Address),
+    GovernanceGovernors,
+    GovernanceQuorumBps,
+    GovernanceMinGovernors,
+    FeeTreasury,
+    FeeBps,
+    EvidenceCounter,
+    Evidence(u64),
+    ProposalEvidence(u64),
+    HashExists(String),
+    Paused,
+    PauseSigner(Address),
+    PauseSignerCount,
+    PauseThreshold,
+    PauseProposalCounter,
+    PauseProposal(u64),
+    PauseApproval(u64, Address),
+    PauseApprovalCount(u64),
+    PendingClaims(Address),
+    ClaimableAmount(Address),
+    ClaimCounter,
+    ClaimById(u64),
+    BondToken,
+    GraceWindow, // FIX 1: added for configurable post-expiry grace window
+    // Upgrade authorization storage keys
+    Upgrade(UpgradeKey),
+    // Supply cap enforcement storage keys
+    SupplyCap,
+    TotalSupply,
+    LastCollateralIncreaseLedger,
+    // Borrow freeze
+    BorrowFrozen,
+}
+
 pub mod access_control;
 mod batch;
 mod claims;
@@ -235,7 +300,9 @@ impl CredenceBond {
             panic!("ZeroAddress");
         }
 
-        e.storage().instance().set(&DataKey::PndgAdmin, &new_admin);
+        e.storage()
+            .instance()
+            .set(&DataKey::Upgrade(UpgradeKey::PndgAdmin), &new_admin);
         events::emit_admin_transfer_started(&e, &caller, &new_admin);
     }
 
@@ -245,7 +312,7 @@ impl CredenceBond {
         let pending_admin: Address = e
             .storage()
             .instance()
-            .get(&DataKey::PndgAdmin)
+            .get(&DataKey::Upgrade(UpgradeKey::PndgAdmin))
             .unwrap_or_else(|| panic!("no pending admin"));
 
         if caller != pending_admin {
@@ -266,14 +333,18 @@ impl CredenceBond {
             .set(&Symbol::new(&e, "admin"), &caller);
 
         // Clear pending admin
-        e.storage().instance().remove(&DataKey::PndgAdmin);
+        e.storage()
+            .instance()
+            .remove(&DataKey::Upgrade(UpgradeKey::PndgAdmin));
 
         events::emit_admin_transfer_completed(&e, &old_admin, &caller);
     }
 
     /// Get the pending admin address.
     pub fn get_pending_admin(e: Env) -> Option<Address> {
-        e.storage().instance().get(&DataKey::PndgAdmin)
+        e.storage()
+            .instance()
+            .get(&DataKey::Upgrade(UpgradeKey::PndgAdmin))
     }
 
     /// Set the supply cap for the bond market. Only admin can call.
@@ -484,6 +555,12 @@ impl CredenceBond {
     }
     pub fn get_emergency_record(e: Env, id: u64) -> emergency::EmergencyWithdrawalRecord {
         emergency::get_record(&e, id)
+    }
+    pub fn latest_emergency_transition(e: Env) -> u64 {
+        emergency::latest_transition_id(&e)
+    }
+    pub fn get_emergency_transition(e: Env, id: u64) -> emergency::EmergencyModeTransition {
+        emergency::get_transition(&e, id)
     }
 
     pub fn latest_emergency_transition(e: Env) -> u64 {
@@ -708,7 +785,7 @@ impl CredenceBond {
             active: true,
             is_rolling,
             withdrawal_requested_at: 0,
-            notice_period_duration: notice_period_duration,
+            notice_period_duration,
         };
         let key = DataKey::Bond;
         e.storage().instance().set(&key, &bond);
@@ -1030,8 +1107,11 @@ impl CredenceBond {
         if emergency_config.enabled {
             // Address is not Option, so we don't need is_none check if it's stored directly.
             // These addresses are required fields in the EmergencyConfig struct.
-            if emergency_config.emergency_fee_bps > 10000 {
-                panic!("emergency fee exceeds maximum (10000 bps = 100%)");
+            if emergency_config.emergency_fee_bps > math::BPS_DENOMINATOR as u32 {
+                panic!(
+                    "emergency fee exceeds maximum ({} bps = 100%)",
+                    math::BPS_DENOMINATOR
+                );
             }
         }
 
@@ -2127,19 +2207,21 @@ impl CredenceBond {
         e: Env,
         address: Address,
     ) -> Option<upgrade_auth::UpgradeAuthorization> {
-        e.storage().instance().get(&DataKey::UpgradeAuth(address))
+        e.storage()
+            .instance()
+            .get(&DataKey::Upgrade(UpgradeKey::Auth(address)))
     }
 
     pub fn get_upgrade_proposal(e: Env, proposal_id: u64) -> Option<upgrade_auth::UpgradeProposal> {
         e.storage()
             .instance()
-            .get(&DataKey::UpgradeProposal(proposal_id))
+            .get(&DataKey::Upgrade(UpgradeKey::Proposal(proposal_id)))
     }
 
     pub fn get_upgrade_history(e: Env) -> soroban_sdk::Vec<upgrade_auth::UpgradeRecord> {
         e.storage()
             .instance()
-            .get(&DataKey::UpgradeHistory)
+            .get(&DataKey::Upgrade(UpgradeKey::History))
             .unwrap_or_else(|| soroban_sdk::Vec::new(&e))
     }
 }

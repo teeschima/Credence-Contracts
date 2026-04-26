@@ -3,7 +3,6 @@
 //! Rejects fee-on-transfer tokens where balance verification fails.
 
 use crate::DataKey;
-use soroban_sdk::token::TokenClient;
 use soroban_sdk::{Address, Env, String, Symbol};
 
 /// Stellar network passphrase label used for USDC mainnet references.
@@ -141,6 +140,4 @@ pub fn transfer_from_contract(e: &Env, recipient: &Address, amount: i128) {
     }
 }
 
-pub fn token_client(e: &Env) -> TokenClient<'_> {
-    TokenClient::new(e, &get_token(e))
-}
+

@@ -156,7 +156,7 @@ fn test_emergency_withdraw_rejects_non_positive_amount() {
 }
 
 #[test]
-#[should_panic(expected = "emergency fee bps must be <= 10000")]
+#[should_panic(expected = "emergency fee bps must be <= BPS_DENOMINATOR")]
 fn test_set_emergency_config_rejects_invalid_fee_bps() {
     let e = Env::default();
     let (client, admin, governance, treasury, _identity) = setup(&e);
@@ -181,7 +181,7 @@ fn test_set_emergency_mode_records_transition() {
 
     let transition = client.get_emergency_transition(&latest_id);
     assert_eq!(transition.id, 1);
-    assert_eq!(transition.enabled, true);
+    assert!(transition.enabled);
     assert_eq!(transition.approved_admin, admin);
     assert_eq!(transition.approved_governance, governance);
     assert_eq!(transition.reason, reason_on);
@@ -197,7 +197,7 @@ fn test_set_emergency_mode_records_transition() {
 
     let transition = client.get_emergency_transition(&latest_id);
     assert_eq!(transition.id, 2);
-    assert_eq!(transition.enabled, false);
+    assert!(!transition.enabled);
     assert_eq!(transition.reason, reason_off);
     assert_eq!(transition.timestamp, 20_001);
 }
@@ -213,13 +213,13 @@ fn test_set_emergency_config_records_transition() {
     let latest_id = client.latest_emergency_transition();
     assert_eq!(latest_id, 1);
     let transition = client.get_emergency_transition(&1);
-    assert_eq!(transition.enabled, true);
+    assert!(transition.enabled);
     assert_eq!(transition.reason, Symbol::new(&e, "InitialSetup"));
 
     // Update config with enabled=false should record another transition
     client.set_emergency_config(&admin, &governance, &treasury, &250, &false);
     assert_eq!(client.latest_emergency_transition(), 2);
     let transition = client.get_emergency_transition(&2);
-    assert_eq!(transition.enabled, false);
+    assert!(!transition.enabled);
     assert_eq!(transition.reason, Symbol::new(&e, "ConfigUpdate"));
 }

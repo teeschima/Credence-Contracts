@@ -32,7 +32,7 @@ fn setup_with_decimals(
     e.mock_all_auths();
     let contract_id = e.register(CredenceBond, ());
     let client = CredenceBondClient::new(e, &contract_id);
-    let admin = Address::generate(&e);
+    let admin = Address::generate(e);
     let identity = Address::generate(e);
 
     client.initialize(&admin);

@@ -178,7 +178,7 @@ fn test_supply_cap_withdrawal_reduces_supply() {
     client.set_supply_cap(&admin, &cap);
 
     // Create bond
-    let bond = client.create_bond(&identity, &8000_i128, &86400_u64);
+    let _bond = client.create_bond(&identity, &8000_i128, &86400_u64);
     assert_eq!(client.get_total_supply(), 8000_i128);
 
     // Withdraw some amount

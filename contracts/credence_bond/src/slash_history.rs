@@ -44,12 +44,14 @@ pub fn append_slash_history(
     e.storage().persistent().set(&count_key, &count);
 }
 
+#[allow(dead_code)]
 #[must_use]
 pub fn get_slash_count(e: &Env, identity: &Address) -> u32 {
     let key = SlashStorageKey::SlashCount(identity.clone());
     e.storage().persistent().get(&key).unwrap_or(0)
 }
 
+#[allow(dead_code)]
 #[must_use]
 pub fn get_slash_history(e: &Env, identity: &Address) -> Vec<SlashRecord> {
     let count = get_slash_count(e, identity);
@@ -65,6 +67,7 @@ pub fn get_slash_history(e: &Env, identity: &Address) -> Vec<SlashRecord> {
     history
 }
 
+#[allow(dead_code)]
 #[must_use]
 pub fn get_slash_record(e: &Env, identity: &Address, index: u32) -> SlashRecord {
     let key = SlashStorageKey::SlashRecord(identity.clone(), index);
@@ -74,6 +77,7 @@ pub fn get_slash_record(e: &Env, identity: &Address, index: u32) -> SlashRecord 
         .unwrap_or_else(|| panic!("slash record not found"))
 }
 
+#[allow(dead_code)]
 #[must_use]
 pub fn get_total_slashed_from_history(e: &Env, identity: &Address) -> i128 {
     let history = get_slash_history(e, identity);
