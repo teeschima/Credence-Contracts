@@ -382,7 +382,13 @@ impl CredenceBond {
         emergency::set_config(&e, governance, treasury, emergency_fee_bps, enabled);
     }
 
-    pub fn set_emergency_mode(e: Env, admin: Address, governance: Address, enabled: bool) {
+    pub fn set_emergency_mode(
+        e: Env,
+        admin: Address,
+        governance: Address,
+        enabled: bool,
+        reason: Symbol,
+    ) {
         pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         let cfg = emergency::get_config(&e);
@@ -391,7 +397,6 @@ impl CredenceBond {
         }
         admin.require_auth();
         governance.require_auth();
-        let reason = Symbol::new(&e, "EmergencyModeChange");
         emergency::set_enabled(&e, enabled, &admin, &governance, reason.clone());
         emergency::emit_emergency_mode_event(&e, enabled, &admin, &governance, &reason);
     }
@@ -479,6 +484,14 @@ impl CredenceBond {
     }
     pub fn get_emergency_record(e: Env, id: u64) -> emergency::EmergencyWithdrawalRecord {
         emergency::get_record(&e, id)
+    }
+
+    pub fn latest_emergency_transition(e: Env) -> u64 {
+        emergency::latest_transition_id(&e)
+    }
+
+    pub fn get_emergency_transition(e: Env, id: u64) -> emergency::EmergencyModeTransition {
+        emergency::get_transition(&e, id)
     }
 
     /// Propose a new upgrade admin (two-step transfer).
@@ -1163,12 +1176,7 @@ impl CredenceBond {
             0,
         );
 
-        // External call after all state updates (CEI pattern)
-        token_integration::transfer_from_contract(&e, &bond.identity, amount);
-        Self::release_lock(&e);
-
-        // INTERACTIONS: external calls after state is committed.
-        // Invoke callback so observers are notified; reentrancy is blocked by the held lock.
+        // INTERACTIONS: external calls after state is committed; reentrancy is blocked by the held lock.
         let cb_key = Symbol::new(&e, "callback");
         if let Some(cb_addr) = e.storage().instance().get::<_, Address>(&cb_key) {
             let fn_name = Symbol::new(&e, "on_withdraw");
@@ -1176,7 +1184,7 @@ impl CredenceBond {
             e.invoke_contract::<Val>(&cb_addr, &fn_name, args);
         }
 
-        // Token transfer is the final external call after all state is settled.
+        // Final token transfer after all state updates and callback invocation.
         token_integration::transfer_from_contract(&e, &bond.identity, amount);
 
         Self::release_lock(&e);
@@ -2194,8 +2202,6 @@ mod test_market_activation;
 mod test_math;
 #[cfg(test)]
 mod test_max_leverage;
-#[cfg(test)]
-mod test_ownership_transfer;
 #[cfg(test)]
 mod test_ownership_transfer;
 #[cfg(test)]

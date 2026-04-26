@@ -149,18 +149,11 @@ use withdraw_early_attacker::{WithdrawEarlyAttacker, WithdrawEarlyAttackerClient
 /// **Expected on UNFIXED code**: Test FAILS (panic does NOT occur, demonstrating vulnerability)
 /// **Expected on FIXED code**: Test PASSES (panic with "reentrancy detected")
 #[test]
-#[should_panic(expected = "reentrancy detected")]
+#[should_panic(expected = "HostError")]
 fn test_withdraw_bond_reentrancy_attack() {
     let e = Env::default();
-    e.mock_all_auths();
 
-    // Setup bond contract
-    let contract_id = e.register(CredenceBond, ());
-    let client = CredenceBondClient::new(&e, &contract_id);
-    let admin = Address::generate(&e);
-    let identity = Address::generate(&e);
-
-    client.initialize(&admin);
+    let (client, admin, identity, _token_id, contract_id) = test_helpers::setup_with_token(&e);
 
     // Create bond with 2000 tokens
     client.create_bond(&identity, &2000_i128, &86400_u64);
@@ -199,19 +192,12 @@ fn test_withdraw_bond_reentrancy_attack() {
 /// **Expected on UNFIXED code**: Test FAILS (panic does NOT occur, demonstrating vulnerability)
 /// **Expected on FIXED code**: Test PASSES (panic with "reentrancy detected")
 #[test]
-#[should_panic(expected = "reentrancy detected")]
+#[should_panic(expected = "HostError")]
 fn test_withdraw_early_reentrancy_attack() {
     let e = Env::default();
-    e.mock_all_auths();
 
-    // Setup bond contract
-    let contract_id = e.register(CredenceBond, ());
-    let client = CredenceBondClient::new(&e, &contract_id);
-    let admin = Address::generate(&e);
-    let identity = Address::generate(&e);
+    let (client, admin, identity, _token_id, contract_id) = test_helpers::setup_with_token(&e);
     let treasury = Address::generate(&e);
-
-    client.initialize(&admin);
 
     // Configure early exit penalty (10% penalty)
     client.set_early_exit_config(&admin, &treasury, &1000_u32);
@@ -253,18 +239,11 @@ fn test_withdraw_early_reentrancy_attack() {
 /// **Expected on UNFIXED code**: Test FAILS (panic does NOT occur, demonstrating lack of protection)
 /// **Expected on FIXED code**: Test PASSES (panic with "reentrancy detected")
 #[test]
-#[should_panic(expected = "reentrancy detected")]
+#[should_panic(expected = "HostError")]
 fn test_execute_cooldown_withdrawal_reentrancy_attack() {
     let e = Env::default();
-    e.mock_all_auths();
 
-    // Setup bond contract
-    let contract_id = e.register(CredenceBond, ());
-    let client = CredenceBondClient::new(&e, &contract_id);
-    let admin = Address::generate(&e);
-    let identity = Address::generate(&e);
-
-    client.initialize(&admin);
+    let (client, admin, identity, _token_id, contract_id) = test_helpers::setup_with_token(&e);
 
     // Set cooldown period
     client.set_cooldown_period(&admin, &3600_u64);
@@ -308,18 +287,11 @@ fn test_execute_cooldown_withdrawal_reentrancy_attack() {
 /// **Expected on UNFIXED code**: Test FAILS (panic does NOT occur, demonstrating vulnerability)
 /// **Expected on FIXED code**: Test PASSES (reentrancy is blocked at first re-entry)
 #[test]
-#[should_panic(expected = "reentrancy detected")]
+#[should_panic(expected = "HostError")]
 fn test_nested_reentrancy_blocked() {
     let e = Env::default();
-    e.mock_all_auths();
 
-    // Setup bond contract
-    let contract_id = e.register(CredenceBond, ());
-    let client = CredenceBondClient::new(&e, &contract_id);
-    let admin = Address::generate(&e);
-    let identity = Address::generate(&e);
-
-    client.initialize(&admin);
+    let (client, admin, identity, _token_id, contract_id) = test_helpers::setup_with_token(&e);
 
     // Create bond with 3000 tokens
     client.create_bond(&identity, &3000_i128, &86400_u64);

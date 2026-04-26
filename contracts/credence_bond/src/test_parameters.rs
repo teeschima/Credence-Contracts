@@ -13,7 +13,7 @@
 use crate::parameters::*;
 use crate::{CredenceBond, CredenceBondClient};
 use soroban_sdk::testutils::{Address as _, Events as _};
-use soroban_sdk::{Address, Env, Symbol, TryFromVal};
+use soroban_sdk::{IntoVal, TryIntoVal, symbol_short, Address, Env, Symbol, TryFromVal};
 
 // ============================================================================
 // Test Setup Utilities
@@ -634,11 +634,10 @@ fn test_parameter_update_v2_event_args() {
 
     // Verify Topics: [Symbol("param_updated"), Symbol("fee_prot"), Symbol("fee"), Address(admin)]
     let topics = last.1;
-    assert_eq!(
-        topics.get(0).unwrap(),
-        Symbol::new(&e, "param_updated").into()
-    );
-    assert_eq!(topics.get(1).unwrap(), symbol_short!("fee_prot").into());
+    let topic0: Symbol = topics.get(0).unwrap().try_into_val(&e).unwrap();
+    assert_eq!(topic0, Symbol::new(&e, "param_updated"));
+    let topic1: Symbol = topics.get(1).unwrap().try_into_val(&e).unwrap();
+    assert_eq!(topic1, symbol_short!("fee_prot"));
 
     // Verify Data: (old_value, new_value)
     let (old_val, new_val): (i128, i128) = last.2.into_val(&e);
