@@ -98,6 +98,11 @@ pub enum ContractError {
     /// Contracts: registry, treasury
     InvalidPauseAction = 107,
 
+    /// Not enough approvals to execute the proposal.
+    /// Replaces: panic!("insufficient signatures to execute"), panic!("insufficient approvals")
+    /// Contracts: multisig, treasury
+    InsufficientSignatures = 108,
+
     // --- Bond (200-299) ---
     /// No bond exists for the given address or key.
     /// Replaces: panic!("no bond")
@@ -323,7 +328,8 @@ impl ErrorExt for ContractError {
             | ContractError::NotSigner
             | ContractError::UnauthorizedDepositor
             | ContractError::ContractPaused
-            | ContractError::InvalidPauseAction => ErrorCategory::Authorization,
+            | ContractError::InvalidPauseAction
+            | ContractError::InsufficientSignatures => ErrorCategory::Authorization,
 
             ContractError::BondNotFound
             | ContractError::BondNotActive
@@ -385,6 +391,7 @@ impl ErrorExt for ContractError {
             }
             ContractError::ContractPaused => "Contract is paused",
             ContractError::InvalidPauseAction => "Pause proposal action is invalid",
+            ContractError::InsufficientSignatures => "Not enough approvals to execute proposal",
             ContractError::BondNotFound => "No bond found for the given key",
             ContractError::BondNotActive => "Bond is not in an active state",
             ContractError::InsufficientBalance => "Insufficient balance for withdrawal",

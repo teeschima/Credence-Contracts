@@ -366,7 +366,6 @@ pub fn emit_upgrade_admin_transfer_completed(e: &Env, old_admin: &Address, new_a
     let data = new_admin.clone();
     e.events().publish(topics, data);
 }
-
 /// Emitted when a protocol parameter is updated.
 ///
 /// # Topics (Indexed)
