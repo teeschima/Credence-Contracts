@@ -6,7 +6,7 @@ use crate::{CredenceBond, CredenceBondClient};
 use soroban_sdk::token::{StellarAssetClient, TokenClient};
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
-    Address, Env, FromVal, Symbol,
+    Address, Env, FromVal, Symbol, Vec,
 };
 
 #[test]

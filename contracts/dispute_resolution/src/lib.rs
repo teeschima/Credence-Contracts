@@ -95,38 +95,18 @@ pub enum Error {
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DisputeCreated {
-    pub dispute_id: u64,
-    pub disputer: Address,
-    pub slash_request_id: u64,
-    pub stake: i128,
-    pub deadline: u64,
+// Event symbols for SDK 22.0 style event publishing
+fn dispute_created_symbol(e: &Env) -> Symbol {
+    Symbol::new(e, "dispute_created")
 }
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VoteCast {
-    pub dispute_id: u64,
-    pub arbitrator: Address,
-    pub favor_disputer: bool,
+fn vote_cast_symbol(e: &Env) -> Symbol {
+    Symbol::new(e, "vote_cast")
 }
-
-#[contractevent]
-#[derive(Clone, Debug, PartialEq)]
-pub struct DisputeResolved {
-    pub dispute_id: u64,
-    pub outcome: DisputeOutcome,
-    pub votes_for_disputer: u64,
-    pub votes_for_slasher: u64,
+fn dispute_resolved_symbol(e: &Env) -> Symbol {
+    Symbol::new(e, "dispute_resolved")
 }
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DisputeExpired {
-    pub dispute_id: u64,
-    pub expired_at: u64,
+fn dispute_expired_symbol(e: &Env) -> Symbol {
+    Symbol::new(e, "dispute_expired")
 }
 
 // ─── Data structures ──────────────────────────────────────────────────────────
@@ -202,6 +182,29 @@ impl DisputeContract {
         env.storage()
             .persistent()
             .extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
+    }
+
+    /// Require that `closer` explicitly authorizes and is allowed to close.
+    ///
+    /// A dispute may be closed by:
+    /// - the original disputer; or
+    /// - the contract admin (when initialized).
+    fn require_closer_auth(env: &Env, dispute: &Dispute, closer: &Address) -> Result<(), Error> {
+        closer.require_auth();
+
+        let is_disputer = closer == &dispute.disputer;
+        let is_admin = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::Admin)
+            .map(|admin| admin == *closer)
+            .unwrap_or(false);
+
+        if !is_disputer && !is_admin {
+            return Err(Error::Unauthorized);
+        }
+
+        Ok(())
     }
 
     // ── Public interface ──────────────────────────────────────────────────────
@@ -282,14 +285,10 @@ impl DisputeContract {
         };
         Self::save_dispute(&env, dispute_id, &dispute);
 
-        DisputeCreated {
-            dispute_id,
-            disputer,
-            slash_request_id,
-            stake,
-            deadline,
-        }
-        .publish(&env);
+        env.events().publish(
+            (dispute_created_symbol(&env),),
+            (dispute_id, disputer, slash_request_id, stake, deadline),
+        );
 
         Ok(dispute_id)
     }
@@ -350,12 +349,10 @@ impl DisputeContract {
         // Persist updated vote tallies back to the dispute record.
         Self::save_dispute(&env, dispute_id, &dispute);
 
-        VoteCast {
-            dispute_id,
-            arbitrator,
-            favor_disputer,
-        }
-        .publish(&env);
+        env.events().publish(
+            (vote_cast_symbol(&env),),
+            (dispute_id, arbitrator, favor_disputer),
+        );
 
         Ok(())
     }
@@ -368,11 +365,14 @@ impl DisputeContract {
     ///
     /// # Errors
     /// * `DisputeNotFound` — unknown `dispute_id`
+    /// * `Unauthorized` — `closer` is neither disputer nor admin
     /// * `DisputeNotOpen` — dispute is already resolved/expired
     /// * `DeadlineNotReached` — voting period is still active
-    pub fn resolve_dispute(env: Env, dispute_id: u64) -> Result<(), Error> {
+    pub fn resolve_dispute(env: Env, closer: Address, dispute_id: u64) -> Result<(), Error> {
         pausable::require_not_paused(&env);
         let mut dispute = Self::load_dispute(&env, dispute_id)?;
+
+        Self::require_closer_auth(&env, &dispute, &closer)?;
 
         if dispute.status != DisputeStatus::Open {
             return Err(Error::DisputeNotOpen);
@@ -411,13 +411,15 @@ impl DisputeContract {
 
         Self::save_dispute(&env, dispute_id, &dispute);
 
-        DisputeResolved {
-            dispute_id,
-            outcome,
-            votes_for_disputer: dispute.votes_for_disputer,
-            votes_for_slasher: dispute.votes_for_slasher,
-        }
-        .publish(&env);
+        env.events().publish(
+            (dispute_resolved_symbol(&env),),
+            (
+                dispute_id,
+                outcome,
+                dispute.votes_for_disputer,
+                dispute.votes_for_slasher,
+            ),
+        );
 
         Ok(())
     }
@@ -427,11 +429,14 @@ impl DisputeContract {
     ///
     /// # Errors
     /// * `DisputeNotFound` — unknown `dispute_id`
+    /// * `Unauthorized` — `closer` is neither disputer nor admin
     /// * `DisputeNotOpen` — dispute is already resolved/expired
     /// * `DeadlineNotReached` — deadline has not yet passed
-    pub fn expire_dispute(env: Env, dispute_id: u64) -> Result<(), Error> {
+    pub fn expire_dispute(env: Env, closer: Address, dispute_id: u64) -> Result<(), Error> {
         pausable::require_not_paused(&env);
         let mut dispute = Self::load_dispute(&env, dispute_id)?;
+
+        Self::require_closer_auth(&env, &dispute, &closer)?;
 
         if dispute.status != DisputeStatus::Open {
             return Err(Error::DisputeNotOpen);
@@ -445,11 +450,9 @@ impl DisputeContract {
 
         Self::save_dispute(&env, dispute_id, &dispute);
 
-        DisputeExpired {
-            dispute_id,
-            expired_at: env.ledger().timestamp(),
-        }
-        .publish(&env);
+        let expired_at = env.ledger().timestamp();
+        env.events()
+            .publish((dispute_expired_symbol(&env),), (dispute_id, expired_at));
 
         Ok(())
     }

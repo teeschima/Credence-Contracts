@@ -317,7 +317,7 @@ fn test_resolve_dispute_favor_disputer_stake_returned() {
     client.cast_vote(&Address::generate(&env), &dispute_id, &true);
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 200);
-    client.resolve_dispute(&dispute_id);
+    client.resolve_dispute(&disputer, &dispute_id);
 
     let dispute = client.get_dispute(&dispute_id);
     assert_eq!(dispute.status, DisputeStatus::Resolved);
@@ -345,7 +345,7 @@ fn test_resolve_dispute_favor_slasher_stake_forfeited() {
     client.cast_vote(&Address::generate(&env), &dispute_id, &false);
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 200);
-    client.resolve_dispute(&dispute_id);
+    client.resolve_dispute(&disputer, &dispute_id);
 
     let dispute = client.get_dispute(&dispute_id);
     assert_eq!(dispute.status, DisputeStatus::Resolved);
@@ -370,7 +370,7 @@ fn test_resolve_dispute_fails_before_deadline() {
     token_client.approve(&disputer, &contract_id, &500, &1000);
     let dispute_id = client.create_dispute(&disputer, &1, &500, &token_id, &3600);
 
-    client.resolve_dispute(&dispute_id);
+    client.resolve_dispute(&disputer, &dispute_id);
 }
 
 #[test]
@@ -382,7 +382,7 @@ fn test_resolve_dispute_fails_not_found() {
     let contract_id = env.register(DisputeContract, ());
     let client = DisputeContractClient::new(&env, &contract_id);
 
-    client.resolve_dispute(&999);
+    client.resolve_dispute(&Address::generate(&env), &999);
 }
 
 #[test]
@@ -402,8 +402,29 @@ fn test_resolve_dispute_fails_already_resolved() {
     let dispute_id = client.create_dispute(&disputer, &1, &500, &token_id, &100);
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 200);
-    client.resolve_dispute(&dispute_id);
-    client.resolve_dispute(&dispute_id);
+    client.resolve_dispute(&disputer, &dispute_id);
+    client.resolve_dispute(&disputer, &dispute_id);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_resolve_dispute_fails_unauthorized_closer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(DisputeContract, ());
+    let client = DisputeContractClient::new(&env, &contract_id);
+
+    let disputer = Address::generate(&env);
+    let unauthorized = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_id, _, token_client) = setup_token(&env, &token_admin, &disputer, 1000);
+
+    token_client.approve(&disputer, &contract_id, &500, &1000);
+    let dispute_id = client.create_dispute(&disputer, &1, &500, &token_id, &100);
+
+    env.ledger().set_timestamp(env.ledger().timestamp() + 200);
+    client.resolve_dispute(&unauthorized, &dispute_id);
 }
 
 // ── expire_dispute ────────────────────────────────────────────────────────────
@@ -424,7 +445,7 @@ fn test_expire_dispute_success() {
     let dispute_id = client.create_dispute(&disputer, &1, &500, &token_id, &100);
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 200);
-    client.expire_dispute(&dispute_id);
+    client.expire_dispute(&disputer, &dispute_id);
 
     let dispute = client.get_dispute(&dispute_id);
     assert_eq!(dispute.status, DisputeStatus::Expired);
@@ -446,7 +467,7 @@ fn test_expire_dispute_fails_before_deadline() {
     token_client.approve(&disputer, &contract_id, &500, &1000);
     let dispute_id = client.create_dispute(&disputer, &1, &500, &token_id, &3600);
 
-    client.expire_dispute(&dispute_id);
+    client.expire_dispute(&disputer, &dispute_id);
 }
 
 #[test]
@@ -458,7 +479,7 @@ fn test_expire_dispute_fails_not_found() {
     let contract_id = env.register(DisputeContract, ());
     let client = DisputeContractClient::new(&env, &contract_id);
 
-    client.expire_dispute(&999);
+    client.expire_dispute(&Address::generate(&env), &999);
 }
 
 #[test]
@@ -478,8 +499,67 @@ fn test_expire_already_resolved_dispute_fails() {
     let dispute_id = client.create_dispute(&disputer, &1, &500, &token_id, &100);
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 200);
-    client.resolve_dispute(&dispute_id);
-    client.expire_dispute(&dispute_id);
+    client.resolve_dispute(&disputer, &dispute_id);
+    client.expire_dispute(&disputer, &dispute_id);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_expire_dispute_fails_unauthorized_closer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(DisputeContract, ());
+    let client = DisputeContractClient::new(&env, &contract_id);
+
+    let disputer = Address::generate(&env);
+    let unauthorized = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_id, _, token_client) = setup_token(&env, &token_admin, &disputer, 1000);
+
+    token_client.approve(&disputer, &contract_id, &500, &1000);
+    let dispute_id = client.create_dispute(&disputer, &1, &500, &token_id, &100);
+
+    env.ledger().set_timestamp(env.ledger().timestamp() + 200);
+    client.expire_dispute(&unauthorized, &dispute_id);
+}
+
+#[test]
+fn test_terminal_state_unchanged_after_failed_second_close() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(DisputeContract, ());
+    let client = DisputeContractClient::new(&env, &contract_id);
+
+    let disputer = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let stake = 500_i128;
+    let (token_id, _, token_client) = setup_token(&env, &token_admin, &disputer, 1000);
+
+    token_client.approve(&disputer, &contract_id, &stake, &1000);
+    let dispute_id = client.create_dispute(&disputer, &1, &stake, &token_id, &100);
+
+    client.cast_vote(&Address::generate(&env), &dispute_id, &true);
+    client.cast_vote(&Address::generate(&env), &dispute_id, &false);
+    client.cast_vote(&Address::generate(&env), &dispute_id, &true);
+
+    env.ledger().set_timestamp(env.ledger().timestamp() + 200);
+    client.resolve_dispute(&disputer, &dispute_id);
+
+    let after_first_close = client.get_dispute(&dispute_id);
+    assert_eq!(after_first_close.status, DisputeStatus::Resolved);
+    assert_eq!(after_first_close.outcome, DisputeOutcome::FavorDisputer);
+    assert_eq!(token_client.balance(&disputer), 1000);
+
+    let second_close = client.try_resolve_dispute(&disputer, &dispute_id);
+    assert!(second_close.is_err());
+
+    let after_failed_close = client.get_dispute(&dispute_id);
+    assert_eq!(after_failed_close.status, DisputeStatus::Resolved);
+    assert_eq!(after_failed_close.outcome, DisputeOutcome::FavorDisputer);
+    assert_eq!(token_client.balance(&disputer), 1000);
+    assert_eq!(token_client.balance(&contract_id), 0);
 }
 
 #[test]
@@ -499,7 +579,7 @@ fn test_cannot_vote_on_expired_dispute() {
     let dispute_id = client.create_dispute(&disputer, &1, &500, &token_id, &100);
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 200);
-    client.expire_dispute(&dispute_id);
+    client.expire_dispute(&disputer, &dispute_id);
     client.cast_vote(&Address::generate(&env), &dispute_id, &true);
 }
 

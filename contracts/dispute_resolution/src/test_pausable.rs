@@ -9,7 +9,7 @@ fn test_pause_unpause() {
     e.mock_all_auths();
 
     let admin = Address::generate(&e);
-    let contract_id = e.register_contract(None, DisputeContract);
+    let contract_id = e.register(DisputeContract, ());
     let client = DisputeContractClient::new(&e, &contract_id);
 
     client.initialize(&admin);

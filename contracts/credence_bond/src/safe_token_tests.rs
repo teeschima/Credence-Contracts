@@ -6,6 +6,10 @@
 //! - Edge cases and boundary conditions
 //! - Allowance and approval patterns
 
+#![cfg(test)]
+
+extern crate std;
+
 use crate::safe_token::*;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{testutils::Address as TestAddress, testutils::Ledger as TestLedger, Address, Env};

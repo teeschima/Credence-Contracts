@@ -1,3 +1,7 @@
+#![cfg(test)]
+
+extern crate std;
+
 use crate::{
     claims::{self, ClaimResult, ClaimType, PendingClaim},
     CredenceBondClient,
