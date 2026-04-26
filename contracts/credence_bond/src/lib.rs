@@ -899,7 +899,6 @@ impl CredenceBond {
             id,
             attester: attester.clone(),
             subject: subject.clone(),
-            attestation_data: attestation_data.clone(),
             timestamp: e.ledger().timestamp(),
             weight,
             revoked: false,
@@ -1601,6 +1600,7 @@ impl CredenceBond {
         })
     }
 
+    // push the bond end date further out
     pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
         pausable::require_not_paused(&e);
         let key = DataKey::Bond;
