@@ -5,6 +5,8 @@
 //! is replicated here so the delegation contract remains self-contained.
 
 use soroban_sdk::{Address, Env};
+use soroban_sdk::panic_with_error;
+use credence_errors::ContractError;
 
 use crate::DataKey;
 
@@ -25,9 +27,11 @@ pub fn get_nonce(e: &Env, identity: &Address) -> u64 {
 pub fn consume_nonce(e: &Env, identity: &Address, expected_nonce: u64) {
     let current = get_nonce(e, identity);
     if current != expected_nonce {
-        panic!("invalid nonce: replay or out-of-order");
+        panic_with_error!(e, ContractError::InvalidNonce);
     }
-    let next = current.checked_add(1).expect("nonce overflow");
+    let next = current
+        .checked_add(1)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::Overflow));
     e.storage()
         .instance()
         .set(&DataKey::Nonce(identity.clone()), &next);
@@ -49,13 +53,13 @@ pub fn invalidate_nonce_range(
 ) -> (u64, u64) {
     let current = get_nonce(e, identity);
     if new_nonce <= current {
-        panic!("new nonce must be greater than current nonce");
+        panic_with_error!(e, ContractError::InvalidNonce);
     }
     let span = new_nonce
         .checked_sub(current)
-        .expect("nonce underflow during invalidation");
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::Underflow));
     if span > max_span {
-        panic!("nonce invalidation exceeds max batch size");
+        panic_with_error!(e, ContractError::InvalidNonce);
     }
 
     e.storage()

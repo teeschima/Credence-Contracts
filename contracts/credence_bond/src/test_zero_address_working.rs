@@ -11,7 +11,7 @@ mod zero_address_tests {
     }
 
     fn setup_contract(env: &Env) -> (Address, Address) {
-        let contract = create_contract();
+        let _contract = create_contract();
         let admin = Address::generate(env);
         let contract_address = env.register(CredenceBond, ());
 

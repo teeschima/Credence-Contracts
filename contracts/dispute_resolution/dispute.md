@@ -24,8 +24,8 @@ create_dispute → cast_vote (multiple arbitrators) → resolve_dispute
 |----------|-----------|-------------|
 | `create_dispute` | Disputer | Opens dispute, pulls stake into contract |
 | `cast_vote` | Arbitrator | Vote before deadline |
-| `resolve_dispute` | Anyone | Finalizes after deadline |
-| `expire_dispute` | Anyone | Marks expired if unresolved |
+| `resolve_dispute` | Disputer or admin | Finalizes after deadline |
+| `expire_dispute` | Disputer or admin | Marks expired if unresolved |
 | `get_dispute` | Anyone | Fetch dispute by ID |
 | `has_voted` | Anyone | Check if address voted |
 | `get_dispute_count` | Anyone | Total disputes |
@@ -77,6 +77,10 @@ create_dispute → cast_vote (multiple arbitrators) → resolve_dispute
 ## Security Notes
 
 - One vote per arbitrator enforced via `Vote(dispute_id, address)` storage key
+- Closure authorization enforced: only the original disputer or contract admin may close
+- Terminal-state invariants enforced:
+    - no double-close (`Resolved`/`Expired` cannot be closed again)
+    - no unauthorized close (`Error::Unauthorized`, code `#6`)
 - State updated before token transfers — no re-entrancy risk
 - Minimum stake prevents spam disputes
 - Timestamps sourced from `env.ledger().timestamp()` — not manipulable by callers

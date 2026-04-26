@@ -1,8 +1,8 @@
 #![cfg(test)]
 
-use crate::{CredenceBond, CredenceBondClient, BondTier};
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
+use crate::{BondTier, CredenceBond, CredenceBondClient};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
 
 #[contract]
 pub struct MockToken;
@@ -10,19 +10,29 @@ pub struct MockToken;
 #[contractimpl]
 impl MockToken {
     pub fn decimals(e: Env) -> u32 {
-        e.storage().instance().get(&Symbol::new(&e, "decimals")).unwrap_or(7)
+        e.storage()
+            .instance()
+            .get(&Symbol::new(&e, "decimals"))
+            .unwrap_or(7)
     }
-    pub fn balance(_e: Env, _id: Address) -> i128 { 1_000_000_000_000_000_000_000_000_i128 }
+    pub fn balance(_e: Env, _id: Address) -> i128 {
+        1_000_000_000_000_000_000_000_000_i128
+    }
     pub fn transfer(_e: Env, _from: Address, _to: Address, _amount: i128) {}
     pub fn transfer_from(_e: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {}
-    pub fn allowance(_e: Env, _from: Address, _spender: Address) -> i128 { i128::MAX }
+    pub fn allowance(_e: Env, _from: Address, _spender: Address) -> i128 {
+        i128::MAX
+    }
 }
 
-fn setup_with_decimals(e: &Env, decimals: u32) -> (CredenceBondClient<'_>, Address, Address, Address) {
+fn setup_with_decimals(
+    e: &Env,
+    decimals: u32,
+) -> (CredenceBondClient<'_>, Address, Address, Address) {
     e.mock_all_auths();
     let contract_id = e.register(CredenceBond, ());
     let client = CredenceBondClient::new(e, &contract_id);
-    let admin = Address::generate(&e);
+    let admin = Address::generate(e);
     let identity = Address::generate(e);
 
     client.initialize(&admin);
@@ -30,7 +40,9 @@ fn setup_with_decimals(e: &Env, decimals: u32) -> (CredenceBondClient<'_>, Addre
     let token_id = e.register(MockToken, ());
     // Set decimals for the mock token
     e.as_contract(&token_id, || {
-        e.storage().instance().set(&Symbol::new(e, "decimals"), &decimals);
+        e.storage()
+            .instance()
+            .set(&Symbol::new(e, "decimals"), &decimals);
     });
 
     client.set_token(&admin, &token_id);
@@ -45,7 +57,7 @@ fn test_tier_silver_with_6_decimals() {
     // 1000 tokens in 6 decimals = 1,000,000,000
     let amount = 1_000_000_000;
     let bond = client.create_bond_with_rolling(&identity, &amount, &86400, &false, &0);
-    
+
     // Silver tier starts at 1000 tokens (normalized: 10^21)
     assert_eq!(client.get_tier(), BondTier::Silver);
     assert_eq!(bond.bonded_amount, 1_000_000_000_000_000_000_000); // 1000 * 10^18
@@ -59,9 +71,9 @@ fn test_tier_silver_with_18_decimals() {
     // 1000 tokens in 18 decimals = 1,000 * 10^18
     let amount = 1_000_000_000_000_000_000_000;
     let bond = client.create_bond_with_rolling(&identity, &amount, &86400, &false, &0);
-    
+
     assert_eq!(client.get_tier(), BondTier::Silver);
-    assert_eq!(bond.bonded_amount, 1_000_000_000_000_000_000_000); 
+    assert_eq!(bond.bonded_amount, 1_000_000_000_000_000_000_000);
 }
 
 #[test]
@@ -72,7 +84,7 @@ fn test_tier_silver_with_8_decimals() {
     // 1000 tokens in 8 decimals = 1000 * 10^8
     let amount = 100_000_000_000;
     let _bond = client.create_bond_with_rolling(&identity, &amount, &86400, &false, &0);
-    
+
     assert_eq!(client.get_tier(), BondTier::Silver);
 }
 
@@ -93,13 +105,13 @@ fn test_withdraw_correct_amount_6_decimals() {
 
     let amount = 1_000_000_000; // 1000 tokens
     client.create_bond_with_rolling(&identity, &amount, &86400, &false, &0);
-    
+
     // Fast forward
     e.ledger().with_mut(|l| l.timestamp = 100_000);
-    
+
     // Withdraw 400 tokens (400,000,000 native)
     let bond = client.withdraw_bond(&400_000_000);
-    
+
     // 600 tokens left (normalized: 600 * 10^18)
     assert_eq!(bond.bonded_amount, 600_000_000_000_000_000_000);
 }

@@ -18,7 +18,8 @@
 //! signature produced for `domain = Delegate` will be structurally incompatible
 //! with a `revoke_delegation` call even if the nonce happens to match.
 
-use soroban_sdk::{contracttype, Address, Env};
+use credence_errors::ContractError;
+use soroban_sdk::{contracttype, panic_with_error, Address, Env};
 
 /// Labels each function domain that accepts a delegated (off-chain) signature.
 ///
@@ -71,15 +72,15 @@ pub fn verify_payload(
     caller_target: &Address,
 ) {
     if payload.domain != expected_domain {
-        panic!("domain mismatch: payload domain does not match target function");
+        panic_with_error!(e, ContractError::InvalidNonce);
     }
     if &payload.owner != caller_owner {
-        panic!("payload owner mismatch");
+        panic_with_error!(e, ContractError::InvalidNonce);
     }
     if &payload.target != caller_target {
-        panic!("payload target mismatch");
+        panic_with_error!(e, ContractError::InvalidNonce);
     }
     if payload.contract_id != e.current_contract_address() {
-        panic!("payload contract_id mismatch: cross-contract replay detected");
+        panic_with_error!(e, ContractError::InvalidNonce);
     }
 }

@@ -8,18 +8,12 @@
 
 use super::parameters::DEFAULT_MAX_LEVERAGE;
 use super::validation::{validate_bond_amount, MAX_BOND_AMOUNT, MIN_BOND_AMOUNT};
-use super::{CredenceBond, CredenceBondClient};
+use super::CredenceBondClient;
 use crate::test_helpers;
-use soroban_sdk::testutils::Address as _;
+
 use soroban_sdk::{Address, Env};
 
-fn setup(e: &Env) -> (CredenceBondClient<'_>, Address) {
-    let contract_id = e.register(CredenceBond, ());
-    let client = CredenceBondClient::new(e, &contract_id);
-    let admin = Address::generate(e);
-    client.initialize(&admin);
-    (client, admin)
-}
+
 
 fn setup_with_token(e: &Env) -> (CredenceBondClient<'_>, Address, Address) {
     let (client, admin, identity, ..) = test_helpers::setup_with_token(e);

@@ -75,7 +75,7 @@ fn test_fee_max_bps_capped() {
 }
 
 #[test]
-#[should_panic(expected = "fee_bps must be <= 10000")]
+#[should_panic(expected = "fee_bps must be <= BPS_DENOMINATOR")]
 fn test_fee_over_max_rejected() {
     let e = Env::default();
     let (client, admin, _identity) = setup(&e);

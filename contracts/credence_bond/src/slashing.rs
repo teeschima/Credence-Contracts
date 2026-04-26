@@ -15,7 +15,7 @@
 //! - **Over-slash Protection**: Ensures slashed_amount never exceeds bonded_amount
 //! - **Withdrawals**: Affected by slashing (withdrawable = bonded - slashed)
 
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{Address, Env, String, Symbol};
 
 /// Storage key for tracking accumulated slashed funds (for treasury transfer purposes).
 /// Not currently used for fund transfers in this implementation, but reserved for future use.
@@ -118,7 +118,11 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
         .expect("slashed exceeds bonded");
 
     // 4. Cap slash at available balance (not just bonded_amount)
-    let actual_slash_amount = if amount > available { available } else { amount };
+    let actual_slash_amount = if amount > available {
+        available
+    } else {
+        amount
+    };
 
     let new_slashed = bond
         .slashed_amount

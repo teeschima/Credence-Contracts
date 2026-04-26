@@ -4,7 +4,8 @@
 //! Changes must be proposed by the admin, wait for a minimum delay period,
 //! and can be cancelled by governance during the waiting period.
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+use credence_errors::ContractError;
+use soroban_sdk::{contract, contractimpl, contracttype, panic_with_error, Address, Env, Symbol};
 
 /// Execution grace period in seconds after ETA.
 pub const EXECUTION_GRACE_PERIOD: u64 = 86_400;
@@ -68,11 +69,11 @@ impl Timelock {
     /// @param min_delay  Minimum delay in seconds before a change can be executed
     pub fn initialize(e: Env, admin: Address, governance: Address, min_delay: u64) {
         if e.storage().instance().has(&DataKey::Admin) {
-            panic!("already initialized");
+            panic_with_error!(&e, ContractError::AlreadyInitialized);
         }
         admin.require_auth();
         if min_delay == 0 {
-            panic!("min_delay must be greater than zero");
+            panic_with_error!(&e, ContractError::AmountMustBePositive);
         }
         e.storage().instance().set(&DataKey::Admin, &admin);
         e.storage().instance().set(&DataKey::Paused, &false);
@@ -113,17 +114,17 @@ impl Timelock {
             .storage()
             .instance()
             .get(&DataKey::MinDelay)
-            .unwrap_or_else(|| panic!("not initialized"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
 
         if min_delay == 0 {
-            panic!("min_delay must be greater than zero");
+            panic_with_error!(&e, ContractError::AmountMustBePositive);
         }
 
         let eta = e
             .ledger()
             .timestamp()
             .checked_add(min_delay)
-            .expect("eta overflow");
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
 
         Self::queue_change(e, proposer, parameter_key, new_value, eta)
     }
@@ -149,37 +150,41 @@ impl Timelock {
             .storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("not initialized"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
         if proposer != admin {
-            panic!("only admin can propose changes");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         let min_delay: u64 = e
             .storage()
             .instance()
             .get(&DataKey::MinDelay)
-            .unwrap_or_else(|| panic!("not initialized"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
 
         if min_delay == 0 {
-            panic!("min_delay must be greater than zero");
+            panic_with_error!(&e, ContractError::AmountMustBePositive);
         }
 
         let now = e.ledger().timestamp();
-        let earliest_eta = now.checked_add(min_delay).expect("eta overflow");
+        let earliest_eta = now
+            .checked_add(min_delay)
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
         if eta < earliest_eta {
-            panic!("eta must satisfy min delay");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
 
         let expires_at = eta
             .checked_add(EXECUTION_GRACE_PERIOD)
-            .expect("execution window overflow");
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
 
         let id: u64 = e
             .storage()
             .instance()
             .get(&DataKey::ChangeCounter)
             .unwrap_or(0);
-        let next_id = id.checked_add(1).expect("change counter overflow");
+        let next_id = id
+            .checked_add(1)
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
         e.storage()
             .instance()
             .set(&DataKey::ChangeCounter, &next_id);
@@ -217,42 +222,42 @@ impl Timelock {
             .storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("not initialized"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
         admin.require_auth();
 
         let mut change: ParameterChange = e
             .storage()
             .persistent()
             .get(&DataKey::PendingChange(change_id))
-            .unwrap_or_else(|| panic!("change not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::ProposalNotFound));
 
         if change.cancelled {
-            panic!("change has been cancelled");
+            panic_with_error!(&e, ContractError::AlreadyRevoked);
         }
         if change.executed {
-            panic!("change already executed");
+            panic_with_error!(&e, ContractError::ProposalAlreadyExecuted);
         }
 
         let now = e.ledger().timestamp();
         if now < change.eta {
             // Early execution forbidden: must be at or after ETA.
-            panic!("timelock delay has not elapsed");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
         if now > change.expires_at {
             // Late execution forbidden: must be at or before expires_at.
-            panic!("execution window expired");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
 
         if change.min_delay_at_queue == 0 {
-            panic!("min_delay must be greater than zero");
+            panic_with_error!(&e, ContractError::AmountMustBePositive);
         }
 
         let earliest_eta = change
             .proposed_at
             .checked_add(change.min_delay_at_queue)
-            .expect("eta overflow");
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
         if change.eta < earliest_eta {
-            panic!("eta must satisfy min delay");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
 
         change.executed = true;
@@ -278,22 +283,22 @@ impl Timelock {
             .storage()
             .instance()
             .get(&DataKey::GovernanceAddress)
-            .unwrap_or_else(|| panic!("not initialized"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
         if canceller != governance {
-            panic!("only governance can cancel changes");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         let mut change: ParameterChange = e
             .storage()
             .persistent()
             .get(&DataKey::PendingChange(change_id))
-            .unwrap_or_else(|| panic!("change not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::ProposalNotFound));
 
         if change.executed {
-            panic!("change already executed");
+            panic_with_error!(&e, ContractError::ProposalAlreadyExecuted);
         }
         if change.cancelled {
-            panic!("change already cancelled");
+            panic_with_error!(&e, ContractError::AlreadyRevoked);
         }
 
         change.cancelled = true;
@@ -318,11 +323,11 @@ impl Timelock {
             .storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("not initialized"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
         admin.require_auth();
 
         if new_delay == 0 {
-            panic!("min_delay must be greater than zero");
+            panic_with_error!(&e, ContractError::AmountMustBePositive);
         }
 
         let old_delay: u64 = e.storage().instance().get(&DataKey::MinDelay).unwrap_or(0);
@@ -338,7 +343,7 @@ impl Timelock {
         e.storage()
             .persistent()
             .get(&DataKey::PendingChange(change_id))
-            .unwrap_or_else(|| panic!("change not found"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::ProposalNotFound))
     }
 
     /// Get the current minimum delay.
@@ -346,7 +351,7 @@ impl Timelock {
         e.storage()
             .instance()
             .get(&DataKey::MinDelay)
-            .unwrap_or_else(|| panic!("not initialized"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized))
     }
 
     /// Get the admin address.
@@ -354,7 +359,7 @@ impl Timelock {
         e.storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("not initialized"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized))
     }
 
     /// Get the governance address.
@@ -362,7 +367,7 @@ impl Timelock {
         e.storage()
             .instance()
             .get(&DataKey::GovernanceAddress)
-            .unwrap_or_else(|| panic!("not initialized"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized))
     }
 
     pub fn pause(e: Env, caller: Address) -> Option<u64> {

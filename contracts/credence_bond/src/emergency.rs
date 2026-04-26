@@ -72,7 +72,7 @@ pub fn set_config(
     enabled: bool,
 ) {
     if emergency_fee_bps > math::BPS_DENOMINATOR as u32 {
-        panic!("emergency fee bps must be <= 10000 (100%)");
+        panic!("emergency fee bps must be <= {}", math::BPS_DENOMINATOR);
     }
     let cfg = EmergencyConfig {
         governance,
@@ -151,9 +151,7 @@ pub fn get_record(e: &Env, id: u64) -> EmergencyWithdrawalRecord {
         .persistent()
         .get(&EmergencyDataKey::Record(id))
         .unwrap_or_else(|| panic!("record not found"))
-}
-
-/// @notice Get latest transition ID.
+}/// @notice Get latest transition ID.
 pub fn latest_transition_id(e: &Env) -> u64 {
     e.storage()
         .persistent()
@@ -171,6 +169,7 @@ pub fn get_transition(e: &Env, id: u64) -> EmergencyModeTransition {
 
 /// @notice Persist immutable emergency withdrawal record.
 /// @dev Uses persistent storage for forensic traceability and to prevent storage bloat in instance storage.
+#[allow(clippy::too_many_arguments)]
 pub fn store_record(
     e: &Env,
     identity: Address,
@@ -233,7 +232,11 @@ pub fn emit_emergency_withdrawal_event(
     reason: &Symbol,
 ) {
     e.events().publish(
-        (Symbol::new(e, "emergency_withdrawal"), record_id, identity.clone()),
+        (
+            Symbol::new(e, "emergency_withdrawal"),
+            record_id,
+            identity.clone(),
+        ),
         (gross_amount, fee_amount, net_amount, reason.clone()),
     );
 }

@@ -15,10 +15,10 @@ fn setup_with_standard_token(
     env.mock_all_auths();
 
     let contract_id = env.register(CredenceBond, ());
-    let client = CredenceBondClient::new(&env, &contract_id);
+    let client = CredenceBondClient::new(env, &contract_id);
 
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
+    let admin = Address::generate(env);
+    let user = Address::generate(env);
 
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
@@ -66,14 +66,16 @@ fn standard_token_withdrawal_works() {
     assert!(bond.is_rolling);
 
     // Fast-forward past bond maturity
-    env.ledger().set_timestamp(env.ledger().timestamp() + 100_000);
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 100_000);
 
     // Request withdrawal (for rolling bond)
     env.mock_all_auths();
     client.request_withdrawal();
 
     // Withdraw after cooldown for rolling bonds
-    env.ledger().set_timestamp(env.ledger().timestamp() + 10_000);
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 10_000);
     env.mock_all_auths();
     let withdrawn_bond = client.withdraw_bond(&amount);
     assert!(!withdrawn_bond.active);

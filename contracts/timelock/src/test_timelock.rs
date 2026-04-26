@@ -38,7 +38,7 @@ fn test_initialize() {
 }
 
 #[test]
-#[should_panic(expected = "min_delay must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #600)")]
 fn test_initialize_zero_delay() {
     let e = Env::default();
     let contract_id = e.register(Timelock, ());
@@ -97,7 +97,7 @@ fn test_queue_change_with_exact_min_delay_eta() {
 }
 
 #[test]
-#[should_panic(expected = "eta must satisfy min delay")]
+#[should_panic(expected = "Error(Contract, #107)")]
 fn test_queue_change_eta_too_early_fails() {
     let e = Env::default();
     let (client, admin, _gov) = setup_with_delay(&e, 10);
@@ -111,7 +111,7 @@ fn test_queue_change_eta_too_early_fails() {
 }
 
 #[test]
-#[should_panic(expected = "timelock delay has not elapsed")]
+#[should_panic(expected = "Error(Contract, #107)")]
 fn test_execute_change_at_eta_minus_one_boundary_fails() {
     let e = Env::default();
     let (client, admin, _gov) = setup_with_delay(&e, 10);
@@ -131,7 +131,7 @@ fn test_execute_change_at_eta_minus_one_boundary_fails() {
 }
 
 #[test]
-#[should_panic(expected = "only admin can propose changes")]
+#[should_panic(expected = "Error(Contract, #100)")]
 fn test_propose_non_admin_fails() {
     let e = Env::default();
     let (client, _admin, _gov) = setup(&e);
@@ -246,7 +246,7 @@ fn test_grace_window_is_inclusive_until_expires_at() {
 }
 
 #[test]
-#[should_panic(expected = "execution window expired")]
+#[should_panic(expected = "Error(Contract, #107)")]
 fn test_execute_change_after_expiration_fails() {
     let e = Env::default();
     let (client, admin, _gov) = setup_with_delay(&e, 10);
@@ -267,7 +267,7 @@ fn test_execute_change_after_expiration_fails() {
 }
 
 #[test]
-#[should_panic(expected = "timelock delay has not elapsed")]
+#[should_panic(expected = "Error(Contract, #107)")]
 fn test_execute_before_delay_fails() {
     let e = Env::default();
     let (client, admin, _gov) = setup(&e);
@@ -287,7 +287,7 @@ fn test_execute_before_delay_fails() {
 }
 
 #[test]
-#[should_panic(expected = "change already executed")]
+#[should_panic(expected = "Error(Contract, #604)")]
 fn test_execute_already_executed_fails() {
     let e = Env::default();
     let (client, admin, _gov) = setup(&e);
@@ -308,7 +308,7 @@ fn test_execute_already_executed_fails() {
 }
 
 #[test]
-#[should_panic(expected = "only admin can propose changes")]
+#[should_panic(expected = "Error(Contract, #100)")]
 fn test_execute_non_admin_fails() {
     let e = Env::default();
     let (client, _admin, _gov) = setup(&e);
@@ -336,7 +336,7 @@ fn test_cancel_change_by_governance() {
 }
 
 #[test]
-#[should_panic(expected = "only governance can cancel changes")]
+#[should_panic(expected = "Error(Contract, #100)")]
 fn test_cancel_by_non_governance_fails() {
     let e = Env::default();
     let (client, admin, _gov) = setup(&e);
@@ -349,7 +349,7 @@ fn test_cancel_by_non_governance_fails() {
 }
 
 #[test]
-#[should_panic(expected = "change has been cancelled")]
+#[should_panic(expected = "Error(Contract, #502)")]
 fn test_execute_cancelled_change_fails() {
     let e = Env::default();
     let (client, admin, gov) = setup(&e);
@@ -371,7 +371,7 @@ fn test_execute_cancelled_change_fails() {
 }
 
 #[test]
-#[should_panic(expected = "change already cancelled")]
+#[should_panic(expected = "Error(Contract, #502)")]
 fn test_cancel_already_cancelled_fails() {
     let e = Env::default();
     let (client, admin, gov) = setup(&e);
@@ -384,7 +384,7 @@ fn test_cancel_already_cancelled_fails() {
 }
 
 #[test]
-#[should_panic(expected = "change already executed")]
+#[should_panic(expected = "Error(Contract, #604)")]
 fn test_cancel_executed_change_fails() {
     let e = Env::default();
     let (client, admin, gov) = setup(&e);
@@ -419,7 +419,7 @@ fn test_update_min_delay() {
 }
 
 #[test]
-#[should_panic(expected = "min_delay must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #600)")]
 fn test_update_min_delay_zero_fails() {
     let e = Env::default();
     let (client, _admin, _gov) = setup(&e);
@@ -471,7 +471,7 @@ fn test_multiple_pending_changes() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "change not found")]
+#[should_panic(expected = "Error(Contract, #603)")]
 fn test_get_change_not_found() {
     let e = Env::default();
     let (client, _admin, _gov) = setup(&e);
@@ -479,7 +479,7 @@ fn test_get_change_not_found() {
 }
 
 #[test]
-#[should_panic(expected = "already initialized")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_initialize_already_initialized_fails() {
     let e = Env::default();
     let (client, admin, governance) = setup(&e);

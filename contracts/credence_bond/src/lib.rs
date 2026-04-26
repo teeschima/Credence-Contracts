@@ -4,9 +4,73 @@
 extern crate std;
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Bytes, Env, IntoVal, String, Symbol, Val,
-    Vec,
+    contract, contractimpl, contracttype, Address, Bytes, Env, IntoVal, String, Symbol, Val, Vec,
 };
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub enum UpgradeKey {
+    Auth(Address),
+    AuthorizedUpgraders,
+    Implementation,
+    Admin,
+    PndgAdmin,
+    PndgUpgrAdmin,
+    Proposal(u64),
+    NextProposalId,
+    History,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Admin,
+    Bond,
+    Attester(Address),
+    Attestation(u64),
+    AttestationCounter,
+    SubjectAttestations(Address),
+    SubjectAttestationCount(Address),
+    DuplicateCheck(Address, Address, String),
+    /// Per-identity nonce for replay prevention.
+    Nonce(Address),
+    AttesterStake(Address),
+    CooldownReq(Address),
+    GovernanceNextProposalId,
+    GovernanceProposal(u64),
+    GovernanceVote(u64, Address),
+    GovernanceDelegate(Address),
+    GovernanceGovernors,
+    GovernanceQuorumBps,
+    GovernanceMinGovernors,
+    FeeTreasury,
+    FeeBps,
+    EvidenceCounter,
+    Evidence(u64),
+    ProposalEvidence(u64),
+    HashExists(String),
+    Paused,
+    PauseSigner(Address),
+    PauseSignerCount,
+    PauseThreshold,
+    PauseProposalCounter,
+    PauseProposal(u64),
+    PauseApproval(u64, Address),
+    PauseApprovalCount(u64),
+    PendingClaims(Address),
+    ClaimableAmount(Address),
+    ClaimCounter,
+    ClaimById(u64),
+    BondToken,
+    GraceWindow, // FIX 1: added for configurable post-expiry grace window
+    // Upgrade authorization storage keys
+    Upgrade(UpgradeKey),
+    // Supply cap enforcement storage keys
+    SupplyCap,
+    TotalSupply,
+    LastCollateralIncreaseLedger,
+    // Borrow freeze
+    BorrowFrozen,
+}
 
 pub mod access_control;
 mod batch;
@@ -87,7 +151,8 @@ pub struct CooldownRequest {
     pub requested_at: u64,
 }
 
-#[contracttype]
+#[contracttype(export = false)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
     Bond,
@@ -141,7 +206,6 @@ pub enum DataKey {
     UpgradeHistory,
     // Supply cap enforcement storage keys
     SupplyCap,
-    TotalSupply,
     LastCollateralIncreaseLedger,
     // Borrow freeze
     BorrowFrozen,
@@ -230,12 +294,15 @@ impl CredenceBond {
         }
 
         // Zero-address check
-        let zero_str = soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        let zero_str =
+            soroban_sdk::String::from_str(&e, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
         if new_admin.to_string() == zero_str {
             panic!("ZeroAddress");
         }
 
-        e.storage().instance().set(&DataKey::PndgAdmin, &new_admin);
+        e.storage()
+            .instance()
+            .set(&DataKey::Upgrade(UpgradeKey::PndgAdmin), &new_admin);
         events::emit_admin_transfer_started(&e, &caller, &new_admin);
     }
 
@@ -245,7 +312,7 @@ impl CredenceBond {
         let pending_admin: Address = e
             .storage()
             .instance()
-            .get(&DataKey::PndgAdmin)
+            .get(&DataKey::Upgrade(UpgradeKey::PndgAdmin))
             .unwrap_or_else(|| panic!("no pending admin"));
 
         if caller != pending_admin {
@@ -261,17 +328,23 @@ impl CredenceBond {
         // Update admin
         e.storage().instance().set(&DataKey::Admin, &caller);
         // Also update the symbol-based admin key for consistency if used
-        e.storage().instance().set(&Symbol::new(&e, "admin"), &caller);
-        
+        e.storage()
+            .instance()
+            .set(&Symbol::new(&e, "admin"), &caller);
+
         // Clear pending admin
-        e.storage().instance().remove(&DataKey::PndgAdmin);
+        e.storage()
+            .instance()
+            .remove(&DataKey::Upgrade(UpgradeKey::PndgAdmin));
 
         events::emit_admin_transfer_completed(&e, &old_admin, &caller);
     }
 
     /// Get the pending admin address.
     pub fn get_pending_admin(e: Env) -> Option<Address> {
-        e.storage().instance().get(&DataKey::PndgAdmin)
+        e.storage()
+            .instance()
+            .get(&DataKey::Upgrade(UpgradeKey::PndgAdmin))
     }
 
     /// Set the supply cap for the bond market. Only admin can call.
@@ -342,13 +415,26 @@ impl CredenceBond {
             panic!("ZeroAddress");
         }
 
-        let old_cfg = e.storage().instance().get::<_, emergency::EmergencyConfig>(&Symbol::new(&e, "emergency_config"));
-        
+        let old_cfg = e
+            .storage()
+            .instance()
+            .get::<_, emergency::EmergencyConfig>(&Symbol::new(&e, "emergency_config"));
+
         // Always set config with requested params, but if it's the first time and enabled=true,
         // we'll set it to false first then enable it via set_enabled to trigger audit trail.
-        let effective_enabled = if old_cfg.is_none() { false } else { old_cfg.as_ref().unwrap().enabled };
-        
-        emergency::set_config(&e, governance.clone(), treasury.clone(), emergency_fee_bps, effective_enabled);
+        let effective_enabled = if old_cfg.is_none() {
+            false
+        } else {
+            old_cfg.as_ref().unwrap().enabled
+        };
+
+        emergency::set_config(
+            &e,
+            governance.clone(),
+            treasury.clone(),
+            emergency_fee_bps,
+            effective_enabled,
+        );
 
         if let Some(old) = old_cfg {
             if old.enabled != enabled {
@@ -367,7 +453,13 @@ impl CredenceBond {
         emergency::set_config(&e, governance, treasury, emergency_fee_bps, enabled);
     }
 
-    pub fn set_emergency_mode(e: Env, admin: Address, governance: Address, enabled: bool) {
+    pub fn set_emergency_mode(
+        e: Env,
+        admin: Address,
+        governance: Address,
+        enabled: bool,
+        reason: Symbol,
+    ) {
         pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         let cfg = emergency::get_config(&e);
@@ -463,6 +555,20 @@ impl CredenceBond {
     }
     pub fn get_emergency_record(e: Env, id: u64) -> emergency::EmergencyWithdrawalRecord {
         emergency::get_record(&e, id)
+    }
+    pub fn latest_emergency_transition(e: Env) -> u64 {
+        emergency::latest_transition_id(&e)
+    }
+    pub fn get_emergency_transition(e: Env, id: u64) -> emergency::EmergencyModeTransition {
+        emergency::get_transition(&e, id)
+    }
+
+    pub fn latest_emergency_transition(e: Env) -> u64 {
+        emergency::latest_transition_id(&e)
+    }
+
+    pub fn get_emergency_transition(e: Env, id: u64) -> emergency::EmergencyModeTransition {
+        emergency::get_transition(&e, id)
     }
 
     /// Propose a new upgrade admin (two-step transfer).
@@ -679,7 +785,7 @@ impl CredenceBond {
             active: true,
             is_rolling,
             withdrawal_requested_at: 0,
-            notice_period_duration: notice_period_duration,
+            notice_period_duration,
         };
         let key = DataKey::Bond;
         e.storage().instance().set(&key, &bond);
@@ -793,7 +899,6 @@ impl CredenceBond {
             id,
             attester: attester.clone(),
             subject: subject.clone(),
-            attestation_data: attestation_data.clone(),
             timestamp: e.ledger().timestamp(),
             weight,
             revoked: false,
@@ -1001,8 +1106,11 @@ impl CredenceBond {
         if emergency_config.enabled {
             // Address is not Option, so we don't need is_none check if it's stored directly.
             // These addresses are required fields in the EmergencyConfig struct.
-            if emergency_config.emergency_fee_bps > 10000 {
-                panic!("emergency fee exceeds maximum (10000 bps = 100%)");
+            if emergency_config.emergency_fee_bps > math::BPS_DENOMINATOR as u32 {
+                panic!(
+                    "emergency fee exceeds maximum ({} bps = 100%)",
+                    math::BPS_DENOMINATOR
+                );
             }
         }
 
@@ -1146,13 +1254,8 @@ impl CredenceBond {
             false,
             0,
         );
-        
-        // External call after all state updates (CEI pattern)
-        token_integration::transfer_from_contract(&e, &bond.identity, amount);
-        Self::release_lock(&e);
 
-        // INTERACTIONS: external calls after state is committed.
-        // Invoke callback so observers are notified; reentrancy is blocked by the held lock.
+        // INTERACTIONS: external calls after state is committed; reentrancy is blocked by the held lock.
         let cb_key = Symbol::new(&e, "callback");
         if let Some(cb_addr) = e.storage().instance().get::<_, Address>(&cb_key) {
             let fn_name = Symbol::new(&e, "on_withdraw");
@@ -1160,7 +1263,7 @@ impl CredenceBond {
             e.invoke_contract::<Val>(&cb_addr, &fn_name, args);
         }
 
-        // Token transfer is the final external call after all state is settled.
+        // Final token transfer after all state updates and callback invocation.
         token_integration::transfer_from_contract(&e, &bond.identity, amount);
 
         Self::release_lock(&e);
@@ -1497,11 +1600,7 @@ impl CredenceBond {
         })
     }
 
-    pub fn top_up(e: Env, amount: i128) -> IdentityBond {
-        let bond = Self::get_bond(e.clone());
-        Self::increase_bond(e, bond.identity, amount)
-    }
-
+    // push the bond end date further out
     pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
         pausable::require_not_paused(&e);
         let key = DataKey::Bond;
@@ -2108,19 +2207,21 @@ impl CredenceBond {
         e: Env,
         address: Address,
     ) -> Option<upgrade_auth::UpgradeAuthorization> {
-        e.storage().instance().get(&DataKey::UpgradeAuth(address))
+        e.storage()
+            .instance()
+            .get(&DataKey::Upgrade(UpgradeKey::Auth(address)))
     }
 
     pub fn get_upgrade_proposal(e: Env, proposal_id: u64) -> Option<upgrade_auth::UpgradeProposal> {
         e.storage()
             .instance()
-            .get(&DataKey::UpgradeProposal(proposal_id))
+            .get(&DataKey::Upgrade(UpgradeKey::Proposal(proposal_id)))
     }
 
     pub fn get_upgrade_history(e: Env) -> soroban_sdk::Vec<upgrade_auth::UpgradeRecord> {
         e.storage()
             .instance()
-            .get(&DataKey::UpgradeHistory)
+            .get(&DataKey::Upgrade(UpgradeKey::History))
             .unwrap_or_else(|| soroban_sdk::Vec::new(&e))
     }
 }
@@ -2142,13 +2243,13 @@ mod test_attestation_types;
 #[cfg(test)]
 mod test_batch;
 #[cfg(test)]
+mod test_borrow_freeze;
+#[cfg(test)]
 mod test_cooldown;
 #[cfg(test)]
 mod test_create_bond;
 #[cfg(test)]
 mod test_decimals;
-#[cfg(test)]
-mod test_ownership_transfer;
 #[cfg(test)]
 mod test_duration_validation;
 #[cfg(test)]
@@ -2186,6 +2287,8 @@ mod test_math;
 #[cfg(test)]
 mod test_max_leverage;
 #[cfg(test)]
+mod test_ownership_transfer;
+#[cfg(test)]
 mod test_parameters;
 #[cfg(test)]
 mod test_pausable;
@@ -2216,8 +2319,6 @@ mod test_verifier;
 #[cfg(test)]
 mod test_weighted_attestation;
 #[cfg(test)]
-mod test_borrow_freeze;
-#[cfg(test)]
 mod test_withdraw_bond;
 #[cfg(test)]
 mod test_zero_address;
@@ -2225,5 +2326,3 @@ mod test_zero_address;
 mod test_zero_address_working;
 #[cfg(test)]
 mod token_integration_test;
-#[cfg(test)]
-mod test_ownership_transfer;

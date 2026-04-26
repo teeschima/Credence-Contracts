@@ -70,7 +70,7 @@ fn test_set_supply_cap_success() {
 
     let cap = 10000_i128;
     client.set_supply_cap(&admin, &cap);
-    
+
     assert_eq!(client.get_supply_cap(), cap);
 }
 
@@ -178,7 +178,7 @@ fn test_supply_cap_withdrawal_reduces_supply() {
     client.set_supply_cap(&admin, &cap);
 
     // Create bond
-    let bond = client.create_bond(&identity, &8000_i128, &86400_u64);
+    let _bond = client.create_bond(&identity, &8000_i128, &86400_u64);
     assert_eq!(client.get_total_supply(), 8000_i128);
 
     // Withdraw some amount
@@ -250,7 +250,7 @@ fn test_create_bond_duration_overflow() {
     e.ledger().with_mut(|li| {
         li.timestamp = u64::MAX - 1000; // Set timestamp close to max
     });
-    
+
     let contract_id = e.register(CredenceBond, ());
     let client = CredenceBondClient::new(&e, &contract_id);
 
@@ -273,7 +273,7 @@ fn test_create_bond_duplicate() {
     client.initialize(&admin);
 
     let identity = Address::generate(&e);
-    
+
     // Create first bond
     let bond1 = client.create_bond(&identity, &1000_i128, &86400_u64);
     assert_eq!(bond1.bonded_amount, 1000);

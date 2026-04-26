@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use crate::{test_helpers, CredenceBond, CredenceBondClient, DataKey};
+use crate::{CredenceBond, CredenceBondClient, DataKey};
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 #[test]
@@ -10,7 +10,7 @@ fn test_admin_transfer_flow() {
 
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
-    let contract_id = env.register_contract(None, CredenceBond);
+    let contract_id = env.register(CredenceBond, ());
     let client = CredenceBondClient::new(&env, &contract_id);
 
     client.initialize(&admin);
@@ -55,7 +55,7 @@ fn test_admin_transfer_wrong_acceptor() {
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
     let wrong_admin = Address::generate(&env);
-    let contract_id = env.register_contract(None, CredenceBond);
+    let contract_id = env.register(CredenceBond, ());
     let client = CredenceBondClient::new(&env, &contract_id);
 
     client.initialize(&admin);
@@ -72,14 +72,17 @@ fn test_upgrade_admin_transfer_flow() {
 
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
-    let contract_id = env.register_contract(None, CredenceBond);
+    let contract_id = env.register(CredenceBond, ());
     let client = CredenceBondClient::new(&env, &contract_id);
 
     client.initialize(&admin);
-    
+
     // Initial upgrade admin is correct
     let stored: Address = env.as_contract(&contract_id, || {
-        env.storage().instance().get(&DataKey::UpgradeAdmin).unwrap()
+        env.storage()
+            .instance()
+            .get(&DataKey::UpgradeAdmin)
+            .unwrap()
     });
     assert_eq!(stored, admin);
 
@@ -94,7 +97,10 @@ fn test_upgrade_admin_transfer_flow() {
 
     // New admin is now the upgrade admin
     let stored: Address = env.as_contract(&contract_id, || {
-        env.storage().instance().get(&DataKey::UpgradeAdmin).unwrap()
+        env.storage()
+            .instance()
+            .get(&DataKey::UpgradeAdmin)
+            .unwrap()
     });
     assert_eq!(stored, new_admin);
 
@@ -113,7 +119,7 @@ fn test_admin_transfer_to_self() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let contract_id = env.register_contract(None, CredenceBond);
+    let contract_id = env.register(CredenceBond, ());
     let client = CredenceBondClient::new(&env, &contract_id);
 
     client.initialize(&admin);
@@ -129,7 +135,7 @@ fn test_transfer_upgrade_admin_unauthorized() {
     let admin = Address::generate(&env);
     let malicious = Address::generate(&env);
     let new_admin = Address::generate(&env);
-    let contract_id = env.register_contract(None, CredenceBond);
+    let contract_id = env.register(CredenceBond, ());
     let client = CredenceBondClient::new(&env, &contract_id);
 
     client.initialize(&admin);

@@ -88,13 +88,13 @@ fn test_receive_fee_overflow_panics() {
     let e = Env::default();
     let (client, admin, token_id) = setup(&e);
     let stellar_client = soroban_sdk::token::StellarAssetClient::new(&e, &token_id);
-    
+
     // Give admin enough tokens to reach exactly i128::MAX
     // Setup already gave them i128::MAX / 2
     stellar_client.mint(&admin, &(i128::MAX - (i128::MAX / 2)));
-    
+
     client.receive_fee(&admin, &i128::MAX, &FundSource::ProtocolFee);
-    
+
     // For the second deposit, we need 1 more token, but we can't have more than i128::MAX balance in one account easily.
     // Actually, we can just mint 1 more to the admin's balance if it's not already MAX.
     // Wait, i128::MAX is the absolute limit for a single account balance in most token implementations.
@@ -102,7 +102,7 @@ fn test_receive_fee_overflow_panics() {
     let admin2 = Address::generate(&e);
     client.add_depositor(&admin2);
     stellar_client.mint(&admin2, &1);
-    
+
     client.receive_fee(&admin2, &1, &FundSource::ProtocolFee);
 }
 
@@ -162,7 +162,7 @@ fn test_rescue_native_zero_amount() {
 }
 
 #[test]
-#[should_panic(expected = "rescue amount exceeds available balance")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_rescue_native_exceeds_available() {
     let e = Env::default();
     let (client, admin, _token) = setup(&e);
@@ -180,11 +180,11 @@ fn test_receive_fee_as_depositor() {
     let e = Env::default();
     let (client, _admin, token_id) = setup(&e);
     let depositor = Address::generate(&e);
-    
+
     // Give depositor tokens
     let stellar_client = soroban_sdk::token::StellarAssetClient::new(&e, &token_id);
     stellar_client.mint(&depositor, &2000);
-    
+
     client.add_depositor(&depositor);
     client.receive_fee(&depositor, &2000, &FundSource::ProtocolFee);
     assert_eq!(client.get_balance(), 2000);
@@ -522,7 +522,7 @@ fn setup_ready_proposal(amount: i128) -> (Env, CredenceTreasuryClient<'static>, 
 
     e.mock_all_auths();
     client.initialize(&admin, &token_id);
-    
+
     // Give admin tokens and deposit
     stellar_client.mint(&admin, &amount);
     client.receive_fee(&admin, &amount, &FundSource::ProtocolFee);
@@ -562,7 +562,7 @@ fn test_execute_withdrawal_min_amount_out_below_proposal_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "slippage: received amount below minimum")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_execute_withdrawal_slippage_reverts_when_below_min() {
     // min_amount_out > proposal.amount → must revert.
     let (_e, client, id) = setup_ready_proposal(500);
@@ -570,7 +570,7 @@ fn test_execute_withdrawal_slippage_reverts_when_below_min() {
 }
 
 #[test]
-#[should_panic(expected = "slippage: received amount below minimum")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_execute_withdrawal_slippage_reverts_adversarial_large_min() {
     // Adversarial: caller sets an unreachably high min_amount_out.
     let (_e, client, id) = setup_ready_proposal(100);
