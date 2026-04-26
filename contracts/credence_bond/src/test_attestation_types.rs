@@ -1,5 +1,6 @@
 //! Tests for Attestation data structure: validation, serialization, and dedup key.
 
+use alloc::string::String as StdString;
 use crate::types::attestation::{DEFAULT_ATTESTATION_WEIGHT, MAX_ATTESTATION_WEIGHT};
 use crate::types::{Attestation, AttestationDedupKey};
 use soroban_sdk::testutils::Address as _;
@@ -109,6 +110,25 @@ fn attestation_dedup_key_equality() {
         attestation_data: d,
     };
     assert_eq!(k1, k2);
+}
+
+#[test]
+#[should_panic(expected = "attestation data cannot be empty")]
+fn attestation_validate_rejects_empty_data() {
+    let e = Env::default();
+    let data = String::from_str(&e, "");
+    Attestation::validate_data(&data);
+}
+
+#[test]
+#[should_panic(expected = "attestation data exceeds maximum length")]
+fn attestation_validate_rejects_too_long_data() {
+    let e = Env::default();
+    let long_str: StdString = core::iter::repeat('a')
+        .take((MAX_ATTESTATION_DATA_LENGTH + 1) as usize)
+        .collect();
+    let data = String::from_str(&e, &long_str);
+    Attestation::validate_data(&data);
 }
 
 /// Serialization is exercised via add_attestation/get_attestation (contract storage) in test_attestation.

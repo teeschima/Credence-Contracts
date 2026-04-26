@@ -769,6 +769,9 @@ impl CredenceBond {
         attester.require_auth();
         require_verifier(&e, &attester);
 
+        // Validate raw attestation input before taking any stateful actions.
+        Attestation::validate_data(&attestation_data);
+
         // Verify attester is authorized
         let is_authorized: bool = e
             .storage()
@@ -798,6 +801,7 @@ impl CredenceBond {
             weight,
             revoked: false,
         };
+        attestation.validate();
         e.storage()
             .instance()
             .set(&DataKey::Attestation(id), &attestation);

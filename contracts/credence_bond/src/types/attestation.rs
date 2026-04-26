@@ -12,6 +12,10 @@ pub const MAX_ATTESTATION_WEIGHT: u32 = 1_000_000;
 /// Default weight when attester has no stake configured.
 pub const DEFAULT_ATTESTATION_WEIGHT: u32 = 1;
 
+/// Maximum allowed attestation data length (in bytes).
+/// Prevents unbounded storage and enforces reasonable data sizes.
+pub const MAX_ATTESTATION_DATA_LENGTH: u32 = 4096;
+
 /// Attestation record: a verifier's credibility attestation for an identity.
 ///
 /// # Fields
@@ -52,13 +56,34 @@ impl Attestation {
         }
     }
 
-    /// Validates this attestation (weight bounds). Use after deserialization or before storage.
+    /// Validates that attestation data is within allowed bounds.
+    ///
+    /// # Arguments
+    /// * `data` - The attestation data to validate
     ///
     /// # Errors
-    /// Panics if `self.weight` is zero or exceeds `MAX_ATTESTATION_WEIGHT`.
+    /// Panics if:
+    /// * `data` is empty
+    /// * `data` exceeds `MAX_ATTESTATION_DATA_LENGTH`
+    #[inline]
+    pub fn validate_data(data: &String) {
+        let len = data.len();
+        if len == 0 {
+            panic!("attestation data cannot be empty");
+        }
+        if len as u32 > MAX_ATTESTATION_DATA_LENGTH {
+            panic!("attestation data exceeds maximum length");
+        }
+    }
+
+    /// Validates this attestation (weight and data bounds). Use after deserialization or before storage.
+    ///
+    /// # Errors
+    /// Panics if weight or data are invalid.
     #[inline]
     pub fn validate(&self) {
         Self::validate_weight(self.weight);
+        Self::validate_data(&self.attestation_data);
     }
 
     /// Returns true if this attestation is currently active (not revoked).
