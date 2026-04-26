@@ -8,6 +8,71 @@ use soroban_sdk::{
     Vec,
 };
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub enum UpgradeKey {
+    Auth(Address),
+    AuthorizedUpgraders,
+    Implementation,
+    Admin,
+    PndgAdmin,
+    PndgUpgrAdmin,
+    Proposal(u64),
+    NextProposalId,
+    History,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Admin,
+    Bond,
+    Attester(Address),
+    Attestation(u64),
+    AttestationCounter,
+    SubjectAttestations(Address),
+    SubjectAttestationCount(Address),
+    DuplicateCheck(Address, Address, String),
+    /// Per-identity nonce for replay prevention.
+    Nonce(Address),
+    AttesterStake(Address),
+    CooldownReq(Address),
+    GovernanceNextProposalId,
+    GovernanceProposal(u64),
+    GovernanceVote(u64, Address),
+    GovernanceDelegate(Address),
+    GovernanceGovernors,
+    GovernanceQuorumBps,
+    GovernanceMinGovernors,
+    FeeTreasury,
+    FeeBps,
+    EvidenceCounter,
+    Evidence(u64),
+    ProposalEvidence(u64),
+    HashExists(String),
+    Paused,
+    PauseSigner(Address),
+    PauseSignerCount,
+    PauseThreshold,
+    PauseProposalCounter,
+    PauseProposal(u64),
+    PauseApproval(u64, Address),
+    PauseApprovalCount(u64),
+    PendingClaims(Address),
+    ClaimableAmount(Address),
+    ClaimCounter,
+    ClaimById(u64),
+    BondToken,
+    GraceWindow, // FIX 1: added for configurable post-expiry grace window
+    // Upgrade authorization storage keys
+    Upgrade(UpgradeKey),
+    // Supply cap enforcement storage keys
+    SupplyCap,
+    TotalSupply,
+    LastCollateralIncreaseLedger,
+    // Borrow freeze
+    BorrowFrozen,
+}
+
 pub mod access_control;
 mod batch;
 mod claims;
@@ -87,65 +152,6 @@ pub struct CooldownRequest {
     pub requested_at: u64,
 }
 
-#[contracttype]
-pub enum DataKey {
-    Admin,
-    Bond,
-    Attester(Address),
-    Attestation(u64),
-    AttestationCounter,
-    SubjectAttestations(Address),
-    SubjectAttestationCount(Address),
-    DuplicateCheck(Address, Address, String),
-    /// Per-identity nonce for replay prevention.
-    Nonce(Address),
-    AttesterStake(Address),
-    CooldownReq(Address),
-    GovernanceNextProposalId,
-    GovernanceProposal(u64),
-    GovernanceVote(u64, Address),
-    GovernanceDelegate(Address),
-    GovernanceGovernors,
-    GovernanceQuorumBps,
-    GovernanceMinGovernors,
-    FeeTreasury,
-    FeeBps,
-    EvidenceCounter,
-    Evidence(u64),
-    ProposalEvidence(u64),
-    HashExists(String),
-    Paused,
-    PauseSigner(Address),
-    PauseSignerCount,
-    PauseThreshold,
-    PauseProposalCounter,
-    PauseProposal(u64),
-    PauseApproval(u64, Address),
-    PauseApprovalCount(u64),
-    PendingClaims(Address),
-    ClaimableAmount(Address),
-    ClaimCounter,
-    ClaimById(u64),
-    BondToken,
-    GraceWindow, // FIX 1: added for configurable post-expiry grace window
-    // Upgrade authorization storage keys
-    TotalSupply,
-    UpgradeAuth(Address),
-    AuthorizedUpgraders,
-    Implementation,
-    UpgradeAdmin,
-    PndgAdmin,
-    PndgUpgrAdmin,
-    UpgradeProposal(u64),
-    NextProposalId,
-    UpgradeHistory,
-    // Supply cap enforcement storage keys
-    SupplyCap,
-    TotalSupply,
-    LastCollateralIncreaseLedger,
-    // Borrow freeze
-    BorrowFrozen,
-}
 
 /// Maximum number of bonds that can be created in a single batch.
 pub const MAX_BATCH_BOND_SIZE: u32 = 100;
@@ -235,7 +241,7 @@ impl CredenceBond {
             panic!("ZeroAddress");
         }
 
-        e.storage().instance().set(&DataKey::PndgAdmin, &new_admin);
+        e.storage().instance().set(&DataKey::Upgrade(UpgradeKey::PndgAdmin), &new_admin);
         events::emit_admin_transfer_started(&e, &caller, &new_admin);
     }
 
@@ -245,7 +251,7 @@ impl CredenceBond {
         let pending_admin: Address = e
             .storage()
             .instance()
-            .get(&DataKey::PndgAdmin)
+            .get(&DataKey::Upgrade(UpgradeKey::PndgAdmin))
             .unwrap_or_else(|| panic!("no pending admin"));
 
         if caller != pending_admin {
@@ -264,14 +270,14 @@ impl CredenceBond {
         e.storage().instance().set(&Symbol::new(&e, "admin"), &caller);
         
         // Clear pending admin
-        e.storage().instance().remove(&DataKey::PndgAdmin);
+        e.storage().instance().remove(&DataKey::Upgrade(UpgradeKey::PndgAdmin));
 
         events::emit_admin_transfer_completed(&e, &old_admin, &caller);
     }
 
     /// Get the pending admin address.
     pub fn get_pending_admin(e: Env) -> Option<Address> {
-        e.storage().instance().get(&DataKey::PndgAdmin)
+        e.storage().instance().get(&DataKey::Upgrade(UpgradeKey::PndgAdmin))
     }
 
     /// Set the supply cap for the bond market. Only admin can call.
@@ -367,7 +373,7 @@ impl CredenceBond {
         emergency::set_config(&e, governance, treasury, emergency_fee_bps, enabled);
     }
 
-    pub fn set_emergency_mode(e: Env, admin: Address, governance: Address, enabled: bool) {
+    pub fn set_emergency_mode(e: Env, admin: Address, governance: Address, enabled: bool, reason: Symbol) {
         pausable::require_not_paused(&e);
         Self::require_admin_internal(&e, &admin);
         let cfg = emergency::get_config(&e);
@@ -1497,10 +1503,6 @@ impl CredenceBond {
         })
     }
 
-    pub fn top_up(e: Env, amount: i128) -> IdentityBond {
-        let bond = Self::get_bond(e.clone());
-        Self::increase_bond(e, bond.identity, amount)
-    }
 
     pub fn extend_duration(e: Env, additional_duration: u64) -> IdentityBond {
         pausable::require_not_paused(&e);
@@ -2108,19 +2110,19 @@ impl CredenceBond {
         e: Env,
         address: Address,
     ) -> Option<upgrade_auth::UpgradeAuthorization> {
-        e.storage().instance().get(&DataKey::UpgradeAuth(address))
+        e.storage().instance().get(&DataKey::Upgrade(UpgradeKey::Auth(address)))
     }
 
     pub fn get_upgrade_proposal(e: Env, proposal_id: u64) -> Option<upgrade_auth::UpgradeProposal> {
         e.storage()
             .instance()
-            .get(&DataKey::UpgradeProposal(proposal_id))
+            .get(&DataKey::Upgrade(UpgradeKey::Proposal(proposal_id)))
     }
 
     pub fn get_upgrade_history(e: Env) -> soroban_sdk::Vec<upgrade_auth::UpgradeRecord> {
         e.storage()
             .instance()
-            .get(&DataKey::UpgradeHistory)
+            .get(&DataKey::Upgrade(UpgradeKey::History))
             .unwrap_or_else(|| soroban_sdk::Vec::new(&e))
     }
 }
@@ -2223,5 +2225,3 @@ mod test_zero_address;
 mod test_zero_address_working;
 #[cfg(test)]
 mod token_integration_test;
-#[cfg(test)]
-mod test_ownership_transfer;

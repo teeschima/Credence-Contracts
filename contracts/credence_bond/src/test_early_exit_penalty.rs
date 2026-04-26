@@ -108,7 +108,7 @@ fn test_set_early_exit_config_unauthorized() {
 }
 
 #[test]
-#[should_panic(expected = "penalty_bps must be <= 10000")]
+#[should_panic(expected = "penalty_bps must be <= BPS_DENOMINATOR")]
 fn test_set_early_exit_config_invalid_bps() {
     let e = Env::default();
     e.mock_all_auths();
@@ -127,6 +127,6 @@ fn test_calculate_penalty_unit() {
     assert_eq!(p, 50); // 5% of 1000
     let p = early_exit_penalty::calculate_penalty(1000, 0, 100, 500);
     assert_eq!(p, 0);
-    let p = early_exit_penalty::calculate_penalty(1000, 50, 100, 10000);
+    let p = early_exit_penalty::calculate_penalty(1000, 50, 100, math::BPS_DENOMINATOR);
     assert_eq!(p, 500);
 }

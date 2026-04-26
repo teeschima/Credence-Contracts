@@ -637,12 +637,4 @@ fn validate_admin(e: &Env, caller: &Address) {
         panic!("not admin");
     }
 }
-
-/// Emits a parameter change event for off-chain tracking and auditing.
-///
-/// # Arguments
-/// * `e` - Soroban environment for event publishing
-/// * `parameter` - Name of the parameter that changed
-/// * `old_value` - Previous value (normalized to i128)
-/// * `new_value` - New value (normalized to i128)
-/// * `updated_by` - Address that performed the update
+

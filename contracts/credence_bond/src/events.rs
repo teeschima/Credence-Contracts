@@ -345,3 +345,27 @@ pub fn emit_parameter_updated(
     let topics = (Symbol::new(e, "param_updated"), key, category, admin.clone());
     e.events().publish(topics, (old_value, new_value));
 }
+
+/// Emitted when an admin transfer process is initiated.
+pub fn emit_admin_transfer_started(e: &Env, current_admin: &Address, pending_admin: &Address) {
+    let topics = (Symbol::new(e, "admin_transfer_started"), current_admin.clone());
+    e.events().publish(topics, pending_admin.clone());
+}
+
+/// Emitted when an admin transfer process is completed.
+pub fn emit_admin_transfer_completed(e: &Env, old_admin: &Address, new_admin: &Address) {
+    let topics = (Symbol::new(e, "admin_transfer_completed"), old_admin.clone());
+    e.events().publish(topics, new_admin.clone());
+}
+
+/// Emitted when an upgrade admin transfer process is initiated.
+pub fn emit_upgrade_admin_transfer_started(e: &Env, current_admin: &Address, pending_admin: &Address) {
+    let topics = (Symbol::new(e, "upgrade_admin_transfer_started"), current_admin.clone());
+    e.events().publish(topics, pending_admin.clone());
+}
+
+/// Emitted when an upgrade admin transfer process is completed.
+pub fn emit_upgrade_admin_transfer_completed(e: &Env, old_admin: &Address, new_admin: &Address) {
+    let topics = (Symbol::new(e, "upgrade_admin_transfer_completed"), old_admin.clone());
+    e.events().publish(topics, new_admin.clone());
+}
