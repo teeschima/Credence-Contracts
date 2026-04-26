@@ -2176,6 +2176,8 @@ mod test_immutable_config_working;
 #[cfg(test)]
 mod test_increase_bond;
 #[cfg(test)]
+mod test_liquidation_rounding;
+#[cfg(test)]
 mod test_liquidation_scanner;
 #[cfg(test)]
 mod test_market_activation;

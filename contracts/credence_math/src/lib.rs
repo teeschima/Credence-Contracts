@@ -38,6 +38,17 @@ pub fn div_i128(a: i128, b: i128, msg: &'static str) -> i128 {
     a.checked_div(b).unwrap_or_else(|| panic!("{msg}"))
 }
 
+/// Checked `i128` ceiling division with a stable panic message.
+/// Computes ceil(a / b) for b > 0, a >= 0.
+#[inline]
+#[must_use]
+pub fn ceil_div_i128(a: i128, b: i128, msg: &'static str) -> i128 {
+    a.checked_add(b - 1)
+        .unwrap_or_else(|| panic!("{msg}"))
+        .checked_div(b)
+        .unwrap_or_else(|| panic!("{msg}"))
+}
+
 /// Calculate a basis-point percentage of an `i128` amount: `amount * bps / BPS_DENOMINATOR`.
 #[inline]
 #[must_use]
@@ -70,7 +81,7 @@ pub fn split_bps(
 
 #[cfg(test)]
 mod tests {
-    use super::{bps, bps_u64, split_bps};
+    use super::{bps, bps_u64, ceil_div_i128, split_bps};
 
     fn legacy_bps_i128(amount: i128, bps: u32) -> i128 {
         amount
@@ -142,5 +153,39 @@ mod tests {
                 legacy_split_bps(amount, bps_value)
             );
         }
+    }
+
+    #[test]
+    fn ceil_div_i128_zero_numerator() {
+        assert_eq!(ceil_div_i128(0, 5, "test"), 0);
+    }
+
+    #[test]
+    fn ceil_div_i128_exact_division() {
+        assert_eq!(ceil_div_i128(10, 5, "test"), 2);
+    }
+
+    #[test]
+    fn ceil_div_i128_off_by_one_boundary() {
+        assert_eq!(ceil_div_i128(11, 5, "test"), 3);
+    }
+
+    #[test]
+    fn ceil_div_i128_large_values() {
+        assert_eq!(ceil_div_i128(10_000 * 5_001, 10_001, "test"), 5001);
+    }
+
+    #[test]
+    fn ceil_div_i128_bonded_one() {
+        assert_eq!(ceil_div_i128(0, 1, "test"), 0);
+        assert_eq!(ceil_div_i128(1, 1, "test"), 1);
+    }
+
+    #[test]
+    fn ceil_div_i128_known_pairs() {
+        // bonded=3, slashed=2: ceil(2*10_000/3) = 6667
+        assert_eq!(ceil_div_i128(2 * 10_000, 3, "test"), 6667);
+        // bonded=7, slashed=3: ceil(3*10_000/7) = 4286
+        assert_eq!(ceil_div_i128(3 * 10_000, 7, "test"), 4286);
     }
 }

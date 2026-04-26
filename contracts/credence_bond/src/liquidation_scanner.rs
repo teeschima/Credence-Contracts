@@ -293,7 +293,7 @@ pub fn scan_liquidation_candidates(
             }
 
             // Check slash ratio: slashed / bonded >= min_slash_ratio_bps / 10000
-            let slash_ratio_bps = (slashed * 10_000) / bonded;
+            let slash_ratio_bps = crate::math::ceil_div_i128(slashed * 10_000, bonded, "ratio overflow");
             if slash_ratio_bps >= min_slash_ratio_bps as i128 {
                 candidates.push_back(LiquidationCandidate {
                     identity,

@@ -125,6 +125,20 @@ pub fn slash_bond(e: &Env, admin: &Address, amount: i128) -> crate::IdentityBond
         .checked_add(actual_slash_amount)
         .expect("slashing caused overflow");
 
+    // Dust-floor clamp: eliminate sub-dust residual to prevent bad debt
+    const DUST_THRESHOLD: i128 = 1;
+    let new_slashed = if bond.bonded_amount - new_slashed <= DUST_THRESHOLD {
+        bond.bonded_amount
+    } else {
+        new_slashed
+    };
+
+    // Invariant: slashed_amount must never exceed bonded_amount
+    debug_assert!(
+        new_slashed <= bond.bonded_amount,
+        "invariant: slashed <= bonded"
+    );
+
     bond.slashed_amount = new_slashed;
 
     // 5. Append normalized slash history record
