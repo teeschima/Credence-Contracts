@@ -159,3 +159,48 @@ fn fee_and_penalty_use_same_denominator_for_equal_rates() {
         "fee and penalty base diverge for rate={rate_bps} bps"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Documentation-matching regression vectors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn early_exit_penalty_regression_vectors() {
+    use crate::early_exit_penalty::calculate_penalty;
+
+    // Case 1: 5% penalty rate, half time remaining
+    // amount = 1000, penalty_bps = 500 (5%), remaining = 50, total = 100
+    // base = 1000 * 500 / 10000 = 50
+    // penalty = 50 * 50 / 100 = 25
+    assert_eq!(calculate_penalty(1000, 50, 100, 500), 25);
+
+    // Case 2: 2.5% penalty rate, 75% time remaining
+    // amount = 1000000, penalty_bps = 250 (2.5%), remaining = 75, total = 100
+    // base = 1000000 * 250 / 10000 = 25000
+    // penalty = 25000 * 75 / 100 = 18750
+    assert_eq!(calculate_penalty(1_000_000, 75, 100, 250), 18_750);
+
+    // Case 3: 10% penalty rate, 10% time remaining
+    // amount = 10000, penalty_bps = 1000 (10%), remaining = 1, total = 10
+    // base = 10000 * 1000 / 10000 = 1000
+    // penalty = 1000 * 1 / 10 = 100
+    assert_eq!(calculate_penalty(10000, 1, 10, 1000), 100);
+}
+
+#[test]
+fn fee_math_edge_cases() {
+    // Zero amount
+    let (fee, net) = math::split_bps(0, 500, "mul", "div", "sub");
+    assert_eq!(fee, 0);
+    assert_eq!(net, 0);
+
+    // Zero BPS
+    let (fee, net) = math::split_bps(1_000_000, 0, "mul", "div", "sub");
+    assert_eq!(fee, 0);
+    assert_eq!(net, 1_000_000);
+
+    // Max BPS (100%)
+    let (fee, net) = math::split_bps(1_000_000, BPS_DENOMINATOR as u32, "mul", "div", "sub");
+    assert_eq!(fee, 1_000_000);
+    assert_eq!(net, 0);
+}

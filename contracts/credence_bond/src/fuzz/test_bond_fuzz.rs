@@ -267,7 +267,7 @@ fn fuzz_bond_operations() {
         client.set_early_exit_config(&admin, &treasury, &500_u32);
 
         // Keep allowance large across iterations.
-        let expiration = e.ledger().sequence().saturating_add(10_000) as u32;
+        let expiration = e.ledger().sequence().saturating_add(10_000);
         token_client.approve(&identity, &bond_contract_id, &i128::MAX, &expiration);
 
         let mut rng = SplitMix64::new(seed);
@@ -334,7 +334,7 @@ fn fuzz_bond_operations() {
             // Top up identity balance occasionally so long runs don't starve on token balance.
             if iter % 512 == 0 {
                 asset_client.mint(&identity, &10_000_000_000_000_i128);
-                let expiration = e.ledger().sequence().saturating_add(10_000) as u32;
+                let expiration = e.ledger().sequence().saturating_add(10_000);
                 token_client.approve(&identity, &bond_contract_id, &i128::MAX, &expiration);
             }
 

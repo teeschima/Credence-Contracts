@@ -30,7 +30,7 @@ pub fn get_config(e: &Env) -> (Address, u32) {
 /// Set early exit config. Only admin should call (enforced by caller).
 pub fn set_config(e: &Env, treasury: Address, penalty_bps: u32) {
     if penalty_bps > math::BPS_DENOMINATOR as u32 {
-        panic!("penalty_bps must be <= 10000 (100%)");
+        panic!("penalty_bps must be <= {}", math::BPS_DENOMINATOR);
     }
     e.storage()
         .instance()

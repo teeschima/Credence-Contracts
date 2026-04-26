@@ -24,8 +24,8 @@
 //! - old value
 //! - new value
 
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 use crate::events::emit_parameter_updated;
+use soroban_sdk::{contracttype, symbol_short, Address, Env, String, Symbol};
 
 // ============================================================================
 // Parameter Bounds Constants
@@ -255,7 +255,9 @@ pub fn set_protocol_fee_bps(e: &Env, admin: &Address, value: u32) {
     }
 
     let old_value = get_protocol_fee_bps(e);
-    e.storage().instance().set(&ParameterKey::ProtocolFeeBps, &value);
+    e.storage()
+        .instance()
+        .set(&ParameterKey::ProtocolFeeBps, &value);
 
     emit_parameter_updated(
         e,
@@ -646,3 +648,22 @@ fn validate_admin(e: &Env, caller: &Address) {
 /// * `old_value` - Previous value (normalized to i128)
 /// * `new_value` - New value (normalized to i128)
 /// * `updated_by` - Address that performed the update
+fn emit_parameter_changed(
+    e: &Env,
+    parameter: &str,
+    old_value: i128,
+    new_value: i128,
+    updated_by: &Address,
+) {
+    let timestamp = e.ledger().timestamp();
+    e.events().publish(
+        (Symbol::new(e, "parameter_changed"),),
+        (
+            String::from_str(e, parameter),
+            old_value,
+            new_value,
+            updated_by.clone(),
+            timestamp,
+        ),
+    );
+}

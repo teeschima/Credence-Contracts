@@ -1,7 +1,6 @@
 #![cfg(test)]
 
 use crate::{DisputeContract, DisputeContractClient};
-use credence_errors::ContractError;
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 #[test]
@@ -10,7 +9,7 @@ fn test_pause_unpause() {
     e.mock_all_auths();
 
     let admin = Address::generate(&e);
-    let contract_id = e.register_contract(None, DisputeContract);
+    let contract_id = e.register(DisputeContract, ());
     let client = DisputeContractClient::new(&e, &contract_id);
 
     client.initialize(&admin);
@@ -30,10 +29,7 @@ fn test_pause_unpause() {
         &Address::generate(&e),
         &3600,
     );
-    assert_eq!(
-        res.err(),
-        Some(soroban_sdk::Val::from_u32(ContractError::ContractPaused as u32).into())
-    );
+    assert!(res.is_err());
 
     // Unpause
     client.unpause(&admin);

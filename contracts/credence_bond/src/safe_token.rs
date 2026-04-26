@@ -1,19 +1,9 @@
-//! Safe Token Operations Module
-//!
-//! Provides standardized safe token operations with consistent error handling,
-//! validation, and non-compliant token support similar to OpenZeppelin's SafeERC20.
-//!
-//! ## Features
-//! - Consistent error handling for all token operations
-//! - Validation of token addresses and amounts
-//! - Support for non-compliant tokens that don't return boolean values
-//! - Revert with descriptive error messages
-//! - Allowance checking and safe approval patterns
-
+// Helpers for working with tokens without getting rekt
+// Handles all the annoying edge cases like zero addresses, negative amounts, etc.
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{Address, Env};
 
-/// Error messages for token operations
+// Error messages you'll see when stuff breaks
 pub mod errors {
     #[allow(dead_code)]
     pub const TOKEN_NOT_SET: &str = "token not configured";
@@ -35,21 +25,20 @@ fn validate_token_address(_token: &Address) {
     // Validation is usually handled by require_auth or by checking if it matches a known value.
 }
 
-/// Validates amount is non-negative
+// Can't send negative tokens, that doesn't make sense
 fn validate_amount(amount: i128) {
     if amount < 0 {
         panic!("{}", errors::INVALID_AMOUNT);
     }
 }
 
-/// Gets the configured token address with validation
+// Grab the token address from storage, fail loudly if not there
 pub fn get_token(e: &Env) -> Address {
     let token = crate::token_integration::get_token(e);
-    validate_token_address(&token);
     token
 }
 
-/// Creates a token client with validated token address
+// Get a token client we can actually use to call functions
 pub fn token_client(e: &Env) -> TokenClient<'_> {
     let token = get_token(e);
     TokenClient::new(e, &token)
@@ -69,13 +58,17 @@ pub fn token_client(e: &Env) -> TokenClient<'_> {
 pub fn safe_transfer(e: &Env, recipient: &Address, amount: i128) {
     validate_amount(amount);
     if amount == 0 {
-        return;
+        return; // nothing to do
     }
 
     validate_token_address(recipient);
 
     let contract = e.current_contract_address();
-    token_client(e).transfer(&contract, recipient, &amount);
+    // Use try_transfer so we actually know if it failed
+    match token_client(e).try_transfer(&contract, recipient, &amount) {
+        Ok(_) => {}
+        Err(_) => panic!("{}", errors::TRANSFER_FAILED),
+    }
 }
 
 /// Safely transfers tokens from owner to contract using allowance
@@ -105,7 +98,11 @@ pub fn safe_transfer_from(e: &Env, owner: &Address, amount: i128) {
     }
 
     let contract = e.current_contract_address();
-    token_client(e).transfer_from(&contract, owner, &contract, &amount);
+    // Another try_transfer to catch failures
+    match token_client(e).try_transfer_from(&contract, owner, &contract, &amount) {
+        Ok(_) => {}
+        Err(_) => panic!("{}", errors::TRANSFER_FAILED),
+    }
 }
 
 /// Safely checks allowance with proper error handling
@@ -214,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_validate_amount() {
-        let env = Env::default();
+        let _env = Env::default();
 
         // Valid amounts
         validate_amount(0);

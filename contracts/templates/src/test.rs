@@ -6,7 +6,7 @@ use soroban_sdk::Env;
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn setup(e: &Env) -> (Address, Address, TemplateContractClient) {
+fn setup(e: &Env) -> (Address, Address, TemplateContractClient<'_>) {
     let admin = Address::generate(e);
     let contract_id = e.register(TemplateContract, ());
     let client = TemplateContractClient::new(e, &contract_id);
@@ -102,7 +102,7 @@ fn test_set_record_requires_admin_auth() {
 
     let auths = e.auths();
     // At least one auth entry must be for the admin address.
-    assert!(auths.iter().any(|(addr, _)| addr == admin));
+    assert!(auths.iter().any(|(addr, _)| addr == &admin));
 }
 
 // ---------------------------------------------------------------------------

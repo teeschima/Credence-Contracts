@@ -170,6 +170,7 @@ pub fn emit_bond_withdrawn(e: &Env, identity: &Address, amount_withdrawn: i128, 
 /// # Data
 /// * `String` - Reason for the slash
 /// * `bool` - Whether this was a full slash (bond completely liquidated)
+#[allow(clippy::too_many_arguments)]
 pub fn emit_bond_slashed_v2(
     e: &Env,
     identity: &Address,
@@ -322,9 +323,52 @@ pub fn emit_upgrade_executed(
     e.events().publish(topics, data);
 }
 
+/// Emitted when an administrative transfer is initiated.
+pub fn emit_admin_transfer_started(e: &Env, current_admin: &Address, pending_admin: &Address) {
+    let topics = (
+        Symbol::new(e, "admin_transfer_started"),
+        current_admin.clone(),
+    );
+    let data = pending_admin.clone();
+    e.events().publish(topics, data);
+}
+
+/// Emitted when an administrative transfer is completed.
+pub fn emit_admin_transfer_completed(e: &Env, old_admin: &Address, new_admin: &Address) {
+    let topics = (
+        Symbol::new(e, "admin_transfer_completed"),
+        old_admin.clone(),
+    );
+    let data = new_admin.clone();
+    e.events().publish(topics, data);
+}
+
+/// Emitted when an upgrade admin transfer is initiated.
+pub fn emit_upgrade_admin_transfer_started(
+    e: &Env,
+    current_admin: &Address,
+    pending_upgrade_admin: &Address,
+) {
+    let topics = (
+        Symbol::new(e, "upgrade_admin_transfer_started"),
+        current_admin.clone(),
+    );
+    let data = pending_upgrade_admin.clone();
+    e.events().publish(topics, data);
+}
+
+/// Emitted when an upgrade admin transfer is completed.
+pub fn emit_upgrade_admin_transfer_completed(e: &Env, old_admin: &Address, new_admin: &Address) {
+    let topics = (
+        Symbol::new(e, "upgrade_admin_transfer_completed"),
+        old_admin.clone(),
+    );
+    let data = new_admin.clone();
+    e.events().publish(topics, data);
+}
 
 /// Emitted when a protocol parameter is updated.
-/// 
+///
 /// # Topics (Indexed)
 /// * `Symbol` - "param_updated"
 /// * `Symbol` - Parameter Key (e.g., "leverage")
@@ -342,6 +386,51 @@ pub fn emit_parameter_updated(
     old_value: i128,
     new_value: i128,
 ) {
-    let topics = (Symbol::new(e, "param_updated"), key, category, admin.clone());
+    let topics = (
+        Symbol::new(e, "param_updated"),
+        key,
+        category,
+        admin.clone(),
+    );
     e.events().publish(topics, (old_value, new_value));
+}
+
+/// Emitted when an admin transfer process is initiated.
+pub fn emit_admin_transfer_started(e: &Env, current_admin: &Address, pending_admin: &Address) {
+    let topics = (
+        Symbol::new(e, "admin_transfer_started"),
+        current_admin.clone(),
+    );
+    e.events().publish(topics, pending_admin.clone());
+}
+
+/// Emitted when an admin transfer process is completed.
+pub fn emit_admin_transfer_completed(e: &Env, old_admin: &Address, new_admin: &Address) {
+    let topics = (
+        Symbol::new(e, "admin_transfer_completed"),
+        old_admin.clone(),
+    );
+    e.events().publish(topics, new_admin.clone());
+}
+
+/// Emitted when an upgrade admin transfer process is initiated.
+pub fn emit_upgrade_admin_transfer_started(
+    e: &Env,
+    current_admin: &Address,
+    pending_admin: &Address,
+) {
+    let topics = (
+        Symbol::new(e, "upgrade_admin_transfer_started"),
+        current_admin.clone(),
+    );
+    e.events().publish(topics, pending_admin.clone());
+}
+
+/// Emitted when an upgrade admin transfer process is completed.
+pub fn emit_upgrade_admin_transfer_completed(e: &Env, old_admin: &Address, new_admin: &Address) {
+    let topics = (
+        Symbol::new(e, "upgrade_admin_transfer_completed"),
+        old_admin.clone(),
+    );
+    e.events().publish(topics, new_admin.clone());
 }

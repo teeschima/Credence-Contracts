@@ -1,6 +1,9 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String, Symbol};
+use credence_errors::ContractError;
+use soroban_sdk::{
+    contract, contractimpl, contracttype, panic_with_error, Address, Env, Map, String, Symbol,
+};
 
 pub mod pausable;
 pub mod status;
@@ -51,9 +54,13 @@ impl CredenceArbitration {
         }
         e.storage().instance().set(&DataKey::Admin, &admin);
         e.storage().instance().set(&DataKey::Paused, &false);
-        e.storage().instance().set(&DataKey::PauseSignerCount, &0_u32);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &0_u32);
         e.storage().instance().set(&DataKey::PauseThreshold, &0_u32);
-        e.storage().instance().set(&DataKey::PauseProposalCounter, &0_u64);
+        e.storage()
+            .instance()
+            .set(&DataKey::PauseProposalCounter, &0_u64);
         Ok(())
     }
 
@@ -87,10 +94,7 @@ impl CredenceArbitration {
     }
 
     /// Remove an arbitrator.
-    pub fn unregister_arbitrator(
-        e: Env,
-        arbitrator: Address,
-    ) -> Result<(), ArbitrationError> {
+    pub fn unregister_arbitrator(e: Env, arbitrator: Address) -> Result<(), ArbitrationError> {
         pausable::require_not_paused(&e);
         let admin: Address = e
             .storage()
@@ -121,11 +125,15 @@ impl CredenceArbitration {
 
         let counter_key = DataKey::DisputeCounter;
         let id: u64 = e.storage().instance().get(&counter_key).unwrap_or(0);
-        let next_id = id.checked_add(1).expect("dispute counter overflow");
+        let next_id = id
+            .checked_add(1)
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
         e.storage().instance().set(&counter_key, &next_id);
 
         let start = e.ledger().timestamp();
-        let end = start.checked_add(duration).expect("duration overflow");
+        let end = start
+            .checked_add(duration)
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
 
         // Open → Voting is the initial transition on creation
         require_transition(DisputeStatus::Open, DisputeStatus::Voting)?;
@@ -186,10 +194,8 @@ impl CredenceArbitration {
             .instance()
             .set(&DataKey::Dispute(dispute_id), &dispute);
 
-        e.events().publish(
-            (Symbol::new(&e, "dispute_cancelled"), dispute_id),
-            caller,
-        );
+        e.events()
+            .publish((Symbol::new(&e, "dispute_cancelled"), dispute_id), caller);
         e.events().publish(
             (Symbol::new(&e, "status_transition"), dispute_id),
             (from as u32, DisputeStatus::Cancelled as u32),
@@ -250,7 +256,9 @@ impl CredenceArbitration {
         let current_tally = votes.get(outcome).unwrap_or(0);
         votes.set(
             outcome,
-            current_tally.checked_add(weight).expect("weight overflow"),
+            current_tally
+                .checked_add(weight)
+                .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow)),
         );
         e.storage().instance().set(&votes_key, &votes);
 
@@ -263,10 +271,7 @@ impl CredenceArbitration {
     }
 
     /// Transition Voting → Resolving → Resolved after the voting period ends.
-    pub fn resolve_dispute(
-        e: Env,
-        dispute_id: u64,
-    ) -> Result<u32, ArbitrationError> {
+    pub fn resolve_dispute(e: Env, dispute_id: u64) -> Result<u32, ArbitrationError> {
         pausable::require_not_paused(&e);
 
         let mut dispute: Dispute = e
@@ -287,7 +292,10 @@ impl CredenceArbitration {
         dispute.status = DisputeStatus::Resolving;
         e.events().publish(
             (Symbol::new(&e, "status_transition"), dispute_id),
-            (DisputeStatus::Voting as u32, DisputeStatus::Resolving as u32),
+            (
+                DisputeStatus::Voting as u32,
+                DisputeStatus::Resolving as u32,
+            ),
         );
 
         // Tally
@@ -326,7 +334,10 @@ impl CredenceArbitration {
 
         e.events().publish(
             (Symbol::new(&e, "status_transition"), dispute_id),
-            (DisputeStatus::Resolving as u32, DisputeStatus::Resolved as u32),
+            (
+                DisputeStatus::Resolving as u32,
+                DisputeStatus::Resolved as u32,
+            ),
         );
         e.events().publish(
             (Symbol::new(&e, "dispute_resolved"), dispute_id),

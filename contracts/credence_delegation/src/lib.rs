@@ -1,6 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+use soroban_sdk::panic_with_error;
+use credence_errors::ContractError;
 
 pub mod domain;
 pub mod nonce;
@@ -72,7 +74,7 @@ impl CredenceDelegation {
     /// Initialize the contract with an admin address.
     pub fn initialize(e: Env, admin: Address) {
         if e.storage().instance().has(&DataKey::Admin) {
-            panic!("already initialized");
+            panic_with_error!(&e, ContractError::AlreadyInitialized);
         }
         e.storage().instance().set(&DataKey::Admin, &admin);
         e.storage().instance().set(&DataKey::Paused, &false);
@@ -102,7 +104,7 @@ impl CredenceDelegation {
         owner.require_auth();
 
         if expires_at <= e.ledger().timestamp() {
-            panic!("expiry must be in the future");
+            panic_with_error!(&e, ContractError::ExpiryInPast);
         }
 
         Self::store_delegation(&e, owner, delegate, delegation_type, expires_at)
@@ -170,7 +172,7 @@ impl CredenceDelegation {
         nonce::consume_nonce(&e, &owner, payload.nonce);
 
         if expires_at <= e.ledger().timestamp() {
-            panic!("expiry must be in the future");
+            panic_with_error!(&e, ContractError::ExpiryInPast);
         }
 
         Self::store_delegation(&e, owner, delegate, delegation_type, expires_at)
@@ -241,7 +243,7 @@ impl CredenceDelegation {
         e.storage()
             .instance()
             .get(&key)
-            .unwrap_or_else(|| panic!("delegation not found"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::DelegationNotFound))
     }
 
     /// Check whether a delegate is currently valid (not revoked, not expired).
@@ -371,10 +373,10 @@ impl CredenceDelegation {
             .storage()
             .instance()
             .get(&key)
-            .unwrap_or_else(|| panic!("{} not found", kind));
+            .unwrap_or_else(|| panic_with_error!(e, ContractError::DelegationNotFound));
 
         if d.revoked {
-            panic!("{} already revoked", kind);
+            panic_with_error!(e, ContractError::AlreadyRevoked);
         }
 
         d.revoked = true;

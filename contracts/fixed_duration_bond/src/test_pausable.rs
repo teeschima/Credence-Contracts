@@ -25,10 +25,7 @@ fn test_pause_unpause() {
 
     // Try a mutating action while paused
     let res = client.try_set_penalty_config(&admin, &500);
-    assert_eq!(
-        res.err(),
-        Some(soroban_sdk::Val::from_u32(ContractError::ContractPaused as u32).into())
-    );
+    assert!(matches!(res, Ok(Err(ContractError::ContractPaused))));
 
     // Unpause
     client.unpause(&admin);

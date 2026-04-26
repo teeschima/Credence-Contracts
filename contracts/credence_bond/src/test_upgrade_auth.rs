@@ -1,13 +1,10 @@
 extern crate std;
 use crate::{
-    upgrade_auth::{
-        self, UpgradeAuthorization, UpgradeProposal, UpgradeRecord, UpgradeRole, UpgradeStatus,
-    },
-    CredenceBond, CredenceBondClient,
+    upgrade_auth::{self, UpgradeRole, UpgradeStatus},
 };
-use std::panic::AssertUnwindSafe;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Bytes, Env, Vec};
+use std::panic::AssertUnwindSafe;
 
 // Helper: register contract + admin, return (client, admin, contract_id).
 fn setup_with_contract(e: &Env) -> (CredenceBondClient<'_>, Address, Address) {
@@ -159,7 +156,7 @@ fn test_upgrade_execution_with_proposal() {
     let proposer = create_test_address(&env);
     let approver = create_test_address(&env);
     let executor = create_test_address(&env);
-    let old_impl = create_test_address(&env);
+    let _old_impl = create_test_address(&env);
     let new_impl = create_test_address(&env);
 
     // Initialize and setup
@@ -240,7 +237,7 @@ fn test_upgrade_history_tracking() {
     let env = create_test_env();
     let admin = create_test_address(&env);
     let executor = create_test_address(&env);
-    let impl1 = create_test_address(&env);
+    let _impl1 = create_test_address(&env);
     let impl2 = create_test_address(&env);
     let impl3 = create_test_address(&env);
 

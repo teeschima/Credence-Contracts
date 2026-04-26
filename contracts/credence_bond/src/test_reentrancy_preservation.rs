@@ -147,7 +147,7 @@ fn property_withdraw_bond_normal_behavior_preserved() {
         let events = e.events().all();
         let has_bond_withdrawn = events.iter().any(|(contract_id, topics, _data)| {
             contract_id == bond_contract_id
-                && topics.len() > 0
+                && !topics.is_empty()
                 && Symbol::try_from_val(&e, &topics.get(0).unwrap())
                     .map(|topic| topic == Symbol::new(&e, "bond_withdrawn"))
                     .unwrap_or(false)
@@ -216,7 +216,8 @@ fn property_withdraw_early_penalty_calculations_preserved() {
 
         // Calculate expected penalty
         let remaining = duration - elapsed;
-        let penalty = (withdraw_amount * remaining as i128 * 1000) / (duration as i128 * 10000);
+        let penalty = (withdraw_amount * remaining * 1000)
+            / (duration * math::BPS_DENOMINATOR);
         let expected_net = withdraw_amount - penalty;
 
         // Perform early withdrawal

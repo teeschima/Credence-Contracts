@@ -8,7 +8,7 @@
 use crate::{CredenceBond, CredenceBondClient, EvidenceType};
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
 
-fn setup(e: &Env) -> (CredenceBondClient, Address) {
+fn setup(e: &Env) -> (CredenceBondClient<'_>, Address) {
     let contract_id = e.register(CredenceBond, ());
     let client = CredenceBondClient::new(e, &contract_id);
     let admin = Address::generate(e);
@@ -160,9 +160,9 @@ fn test_multiple_evidence_per_proposal() {
     // Get all evidence for proposal
     let evidence_ids = client.get_proposal_evidence(&proposal_id);
     assert_eq!(evidence_ids.len(), 3);
-    assert!(evidence_ids.contains(&id1));
-    assert!(evidence_ids.contains(&id2));
-    assert!(evidence_ids.contains(&id3));
+    assert!(evidence_ids.contains(id1));
+    assert!(evidence_ids.contains(id2));
+    assert!(evidence_ids.contains(id3));
 }
 
 #[test]
@@ -228,7 +228,6 @@ fn test_get_evidence_details() {
     assert_eq!(evidence.submitted_by, submitter);
     assert_eq!(evidence.description, description);
     // Timestamp is set but may be 0 in test environment
-    assert!(evidence.submitted_at >= 0);
 }
 
 #[test]

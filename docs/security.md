@@ -25,3 +25,10 @@ Security mechanisms for the Credence bond and attestation system.
 
 - Reentrancy guard is used in withdraw_bond, slash_bond, and collect_fees; state is updated before any external call (checks-effects-interactions).
 - See contract code for lock acquire/release around callbacks.
+
+## Same-ledger sequencing guardrails
+
+- Credence enforces a same-ledger guard for sensitive bond operations to prevent unfair sandwich-style ordering attacks.
+- The `same_ledger_liquidation_guard` records the current ledger sequence after every collateral-increasing action, including bond creation, top-up, and batch creation.
+- `slash_bond` rejects any slash if the last collateral increase occurred in the current ledger, preventing a slash from executing in the same ledger as an increase.
+- This is a targeted anti-sandwich protection and does not block unrelated operations such as attestations, withdrawals, or governance actions.

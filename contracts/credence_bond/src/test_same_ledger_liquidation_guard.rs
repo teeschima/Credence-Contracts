@@ -28,6 +28,15 @@ fn test_slash_next_ledger_after_increase_bond_allowed() {
 
 #[test]
 #[should_panic(expected = "slash blocked: collateral increased in this ledger")]
+fn test_slash_same_ledger_after_create_bond_rejected() {
+    let e = Env::default();
+    let (client, admin, identity, _token, _id) = test_helpers::setup_with_token(&e);
+    client.create_bond_with_rolling(&identity, &10_000_i128, &86_400_u64, &false, &0_u64);
+    client.slash(&admin, &100_i128);
+}
+
+#[test]
+#[should_panic(expected = "slash blocked: collateral increased in this ledger")]
 fn test_slash_same_ledger_after_top_up_rejected() {
     let e = Env::default();
     let (client, admin, identity, _token, _id) = test_helpers::setup_with_token(&e);

@@ -99,11 +99,11 @@ fn zero_cumulative_amount() -> CumulativeAmount {
     }
 }
 
-fn add_to_cumulative(current: &CumulativeAmount, amount: i128) -> CumulativeAmount {
+fn add_to_cumulative(e: &Env, current: &CumulativeAmount, amount: i128) -> CumulativeAmount {
     let current_remainder = u128::try_from(current.remainder)
-        .unwrap_or_else(|_| panic!("cumulative remainder must be non-negative"));
-    let addend =
-        u128::try_from(amount).unwrap_or_else(|_| panic!("cumulative amount must be non-negative"));
+        .unwrap_or_else(|_| panic_with_error!(e, ContractError::Underflow));
+    let addend = u128::try_from(amount)
+        .unwrap_or_else(|_| panic_with_error!(e, ContractError::AmountMustBePositive));
     let sum = current_remainder + addend;
     let rollover_increment = if sum >= CUMULATIVE_SEGMENT {
         1_u64
@@ -120,13 +120,13 @@ fn add_to_cumulative(current: &CumulativeAmount, amount: i128) -> CumulativeAmou
         rollovers: current
             .rollovers
             .checked_add(rollover_increment)
-            .unwrap_or_else(|| panic!("cumulative rollover overflow")),
+            .unwrap_or_else(|| panic_with_error!(e, ContractError::Overflow)),
         remainder: i128::try_from(remainder)
-            .unwrap_or_else(|_| panic!("cumulative remainder overflow")),
+            .unwrap_or_else(|_| panic_with_error!(e, ContractError::Overflow)),
     }
 }
 
-fn proportional_deduction(source_balance: i128, amount: i128, total: i128) -> i128 {
+fn proportional_deduction(e: &Env, source_balance: i128, amount: i128, total: i128) -> i128 {
     if source_balance == 0 || amount == 0 {
         return 0;
     }
@@ -136,15 +136,16 @@ fn proportional_deduction(source_balance: i128, amount: i128, total: i128) -> i1
 
     let source = U256::new(
         u128::try_from(source_balance)
-            .unwrap_or_else(|_| panic!("source balance must be positive")),
+            .unwrap_or_else(|_| panic_with_error!(e, ContractError::AmountMustBePositive)),
     );
     let withdrawal =
-        U256::new(u128::try_from(amount).unwrap_or_else(|_| panic!("amount must be positive")));
+        U256::new(u128::try_from(amount).unwrap_or_else(|_| panic_with_error!(e, ContractError::AmountMustBePositive)));
     let available =
-        U256::new(u128::try_from(total).unwrap_or_else(|_| panic!("total must be positive")));
+        U256::new(u128::try_from(total).unwrap_or_else(|_| panic_with_error!(e, ContractError::AmountMustBePositive)));
     let deduction = (source * withdrawal) / available;
 
-    i128::try_from(deduction.as_u128()).unwrap_or_else(|_| panic!("deduction overflow"))
+    i128::try_from(deduction.as_u128())
+        .unwrap_or_else(|_| panic_with_error!(e, ContractError::Overflow))
 }
 
 #[contractimpl]
@@ -246,13 +247,13 @@ impl CredenceTreasury {
             .instance()
             .get(&DataKey::CumulativeReceived)
             .unwrap_or_else(zero_cumulative_amount);
-        let new_cumulative_total = add_to_cumulative(&cumulative_total, amount);
+        let new_cumulative_total = add_to_cumulative(&e, &cumulative_total, amount);
         let cumulative_source: CumulativeAmount = e
             .storage()
             .instance()
             .get(&DataKey::CumulativeReceivedBySource(source))
             .unwrap_or_else(zero_cumulative_amount);
-        let new_cumulative_source = add_to_cumulative(&cumulative_source, amount);
+        let new_cumulative_source = add_to_cumulative(&e, &cumulative_source, amount);
         e.storage()
             .instance()
             .set(&DataKey::TotalBalance, &new_total);
@@ -566,9 +567,9 @@ impl CredenceTreasury {
             .unwrap_or(0);
         let remaining = total
             .checked_sub(proposal.amount)
-            .expect("withdrawal underflow");
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Underflow));
         if remaining < min_liquidity {
-            panic!("liquidity guard: withdrawal would breach minimum liquidity floor");
+            panic_with_error!(&e, ContractError::InsufficientTreasuryBalance);
         }
 
         // Perform actual token transfer.
@@ -582,16 +583,16 @@ impl CredenceTreasury {
 
         let actual_amount = recipient_balance_after
             .checked_sub(recipient_balance_before)
-            .expect("balance underflow");
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Underflow));
 
         // Slippage guard: revert if the settled amount falls below the caller's threshold.
         if actual_amount < min_amount_out {
-            panic!("slippage: received amount below minimum");
+            panic_with_error!(&e, ContractError::InsufficientTreasuryBalance);
         }
 
         let new_total = total
             .checked_sub(actual_amount)
-            .expect("withdrawal underflow");
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Underflow));
         let protocol_balance: i128 = e
             .storage()
             .instance()
@@ -602,16 +603,16 @@ impl CredenceTreasury {
             .instance()
             .get(&DataKey::BalanceBySource(FundSource::SlashedFunds))
             .unwrap_or(0);
-        let protocol_deduction = proportional_deduction(protocol_balance, actual_amount, total);
+        let protocol_deduction = proportional_deduction(&e, protocol_balance, actual_amount, total);
         let slashed_deduction = actual_amount
             .checked_sub(protocol_deduction)
-            .expect("withdrawal deduction underflow");
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Underflow));
         let new_protocol_balance = protocol_balance
             .checked_sub(protocol_deduction)
-            .expect("protocol source underflow");
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Underflow));
         let new_slashed_balance = slashed_balance
             .checked_sub(slashed_deduction)
-            .expect("slashed source underflow");
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Underflow));
         e.storage()
             .instance()
             .set(&DataKey::TotalBalance, &new_total);
@@ -639,7 +640,7 @@ impl CredenceTreasury {
         e.storage()
             .instance()
             .get(&DataKey::Token)
-            .unwrap_or_else(|| panic!("token not configured"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized))
     }
 
     /// Update the token address. Only admin can call.
@@ -827,7 +828,7 @@ impl CredenceTreasury {
         let available_for_rescue = treasury_balance; // Simplified for testing
 
         if amount > available_for_rescue {
-            panic!("rescue amount exceeds available balance");
+            panic_with_error!(&e, ContractError::InsufficientTreasuryBalance);
         }
 
         // For testing purposes, we'll just emit the event without actual transfer

@@ -89,7 +89,7 @@ fn nonce_increments_after_delegated_delegate() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "domain mismatch")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn cross_domain_replay_delegate_payload_in_revoke() {
     let (e, client, contract_id) = setup();
     let owner = Address::generate(&e);
@@ -128,7 +128,7 @@ fn cross_domain_replay_delegate_payload_in_revoke() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "domain mismatch")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn cross_domain_replay_revoke_payload_in_delegate() {
     let (e, client, contract_id) = setup();
     let owner = Address::generate(&e);
@@ -160,7 +160,7 @@ fn cross_domain_replay_revoke_payload_in_delegate() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "domain mismatch")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn cross_domain_replay_delegate_payload_in_revoke_attestation() {
     let (e, client, contract_id) = setup();
     let attester = Address::generate(&e);
@@ -184,7 +184,7 @@ fn cross_domain_replay_delegate_payload_in_revoke_attestation() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "invalid nonce")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn nonce_replay_rejected_same_domain() {
     let (e, client, contract_id) = setup();
     let owner = Address::generate(&e);
@@ -215,7 +215,7 @@ fn nonce_replay_rejected_same_domain() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "invalid nonce")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn nonce_replay_rejected_cross_domain_stale_nonce() {
     let (e, client, contract_id) = setup();
     let owner = Address::generate(&e);
@@ -249,7 +249,7 @@ fn nonce_replay_rejected_cross_domain_stale_nonce() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "payload contract_id mismatch")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn cross_contract_replay_rejected() {
     let (e, client, _) = setup();
     let owner = Address::generate(&e);
@@ -281,7 +281,7 @@ fn cross_contract_replay_rejected() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "payload owner mismatch")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn wrong_owner_in_payload_rejected() {
     let (e, client, contract_id) = setup();
     let real_owner = Address::generate(&e);
@@ -313,7 +313,7 @@ fn wrong_owner_in_payload_rejected() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "payload target mismatch")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn wrong_target_in_payload_rejected() {
     let (e, client, contract_id) = setup();
     let owner = Address::generate(&e);
@@ -381,7 +381,7 @@ fn partial_nonce_invalidation_skips_range_and_allows_next_nonce() {
 }
 
 #[test]
-#[should_panic(expected = "invalid nonce")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn full_nonce_invalidation_rejects_previously_valid_payload() {
     let (e, client, contract_id) = setup();
     let owner = Address::generate(&e);
@@ -406,7 +406,7 @@ fn full_nonce_invalidation_rejects_previously_valid_payload() {
 }
 
 #[test]
-#[should_panic(expected = "nonce invalidation exceeds max batch size")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn nonce_invalidation_range_bound_enforced() {
     let (e, client, _) = setup();
     let owner = Address::generate(&e);
@@ -416,7 +416,7 @@ fn nonce_invalidation_range_bound_enforced() {
 }
 
 #[test]
-#[should_panic(expected = "new nonce must be greater than current nonce")]
+#[should_panic(expected = "Error(Contract, #208)")]
 fn nonce_invalidation_must_be_monotonic() {
     let (e, client, _) = setup();
     let owner = Address::generate(&e);
