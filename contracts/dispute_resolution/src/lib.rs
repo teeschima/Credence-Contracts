@@ -19,7 +19,7 @@
 
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, Address, Env,
+    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address, Env,
 };
 
 pub mod pausable;
@@ -90,6 +90,7 @@ pub enum Error {
     InsufficientStake = 7,
     InvalidDeadline = 8,
     TransferFailed = 9,
+    AlreadyInitialized = 10,
 }
 
 // ─── Events ───────────────────────────────────────────────────────────────────
@@ -164,7 +165,7 @@ pub struct DisputeContract;
 impl DisputeContract {
     pub fn initialize(env: Env, admin: Address) {
         if env.storage().instance().has(&DataKey::Admin) {
-            panic!("already initialized");
+            panic_with_error!(&env, Error::AlreadyInitialized);
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
@@ -298,7 +299,8 @@ impl DisputeContract {
     /// Panics with `"Dispute not found"` if the ID does not exist, preserving
     /// the original public API contract expected by callers and tests.
     pub fn get_dispute(env: &Env, dispute_id: u64) -> Dispute {
-        Self::load_dispute(env, dispute_id).expect("Dispute not found")
+        Self::load_dispute(env, dispute_id)
+            .unwrap_or_else(|_| panic_with_error!(env, Error::DisputeNotFound))
     }
 
     /// Cast an arbitrator vote on an open dispute.

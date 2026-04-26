@@ -1,4 +1,5 @@
-use soroban_sdk::{Address, Env, Symbol};
+use credence_errors::ContractError;
+use soroban_sdk::{panic_with_error, Address, Env, Symbol};
 
 use crate::DataKey;
 
@@ -15,7 +16,7 @@ fn require_admin_auth(e: &Env, admin: &Address) {
 
     let caller_role = AdminContract::get_role(e.clone(), admin.clone());
     if caller_role != AdminRole::SuperAdmin {
-        panic!("not super admin");
+        panic_with_error!(e, ContractError::NotAdmin);
     }
     admin.require_auth();
 }
@@ -29,7 +30,7 @@ pub fn is_paused(e: &Env) -> bool {
 
 pub fn require_not_paused(e: &Env) {
     if is_paused(e) {
-        panic!("contract is paused");
+        panic_with_error!(e, ContractError::ContractPaused);
     }
 }
 
@@ -95,7 +96,7 @@ pub fn set_pause_threshold(e: &Env, admin: &Address, threshold: u32) {
         .get(&DataKey::PauseSignerCount)
         .unwrap_or(0);
     if threshold > count {
-        panic!("threshold cannot exceed signer count");
+        panic_with_error!(e, ContractError::ThresholdExceedsSigners);
     }
     e.storage()
         .instance()
@@ -112,7 +113,7 @@ fn require_pause_signer(e: &Env, signer: &Address) {
         .get(&DataKey::PauseSigner(signer.clone()))
         .unwrap_or(false);
     if !ok {
-        panic!("not pause signer");
+        panic_with_error!(e, ContractError::NotSigner);
     }
 }
 
@@ -122,7 +123,9 @@ fn next_proposal_id(e: &Env) -> u64 {
         .instance()
         .get(&DataKey::PauseProposalCounter)
         .unwrap_or(0);
-    let next = id.checked_add(1).expect("pause proposal counter overflow");
+    let next = id
+        .checked_add(1)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::Overflow));
     e.storage()
         .instance()
         .set(&DataKey::PauseProposalCounter, &next);
@@ -140,7 +143,9 @@ fn record_approval(e: &Env, proposal_id: u64, signer: &Address) {
         .instance()
         .get(&DataKey::PauseApprovalCount(proposal_id))
         .unwrap_or(0);
-    let new_count = count.checked_add(1).expect("pause approval count overflow");
+    let new_count = count
+        .checked_add(1)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::Overflow));
     e.storage()
         .instance()
         .set(&DataKey::PauseApprovalCount(proposal_id), &new_count);
@@ -202,7 +207,7 @@ pub fn approve_pause_proposal(e: &Env, signer: &Address, proposal_id: u64) {
         .storage()
         .instance()
         .get(&DataKey::PauseProposal(proposal_id))
-        .unwrap_or_else(|| panic!("proposal not found"));
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::ProposalNotFound));
 
     record_approval(e, proposal_id, signer);
 
@@ -217,7 +222,7 @@ pub fn execute_pause_proposal(e: &Env, proposal_id: u64) {
         .storage()
         .instance()
         .get(&DataKey::PauseProposal(proposal_id))
-        .unwrap_or_else(|| panic!("proposal not found"));
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::ProposalNotFound));
 
     let threshold: u32 = e
         .storage()
@@ -231,13 +236,13 @@ pub fn execute_pause_proposal(e: &Env, proposal_id: u64) {
         .unwrap_or(0);
 
     if approvals < threshold {
-        panic!("insufficient approvals to execute");
+        panic_with_error!(e, ContractError::InsufficientApprovals);
     }
 
     match action {
         1 => do_pause(e, Some(proposal_id)),
         2 => do_unpause(e, Some(proposal_id)),
-        _ => panic!("invalid pause action"),
+        _ => panic_with_error!(e, ContractError::InvalidPauseAction),
     }
 
     e.storage()

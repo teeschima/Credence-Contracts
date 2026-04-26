@@ -6,6 +6,8 @@ pub mod pausable;
 mod test_ownership_transfer;
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
+use credence_errors::ContractError;
+use soroban_sdk::panic_with_error;
 
 /// Admin role hierarchy levels
 #[contracttype]
@@ -86,15 +88,15 @@ impl AdminContract {
     /// Emits `admin_initialized` with the super admin address
     pub fn initialize(e: Env, super_admin: Address, min_admins: u32, max_admins: u32) {
         if e.storage().instance().has(&DataKey::Initialized) {
-            panic!("already initialized");
+            panic_with_error!(&e, ContractError::AlreadyInitialized);
         }
 
         if min_admins == 0 {
-            panic!("min_admins cannot be zero");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
 
         if min_admins > max_admins {
-            panic!("min_admins cannot be greater than max_admins");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
 
         super_admin.require_auth();
@@ -182,19 +184,19 @@ impl AdminContract {
 
         // Verify caller authorization
         Self::require_role_at_least(&e, &caller, Self::get_required_role_to_assign(role))
-            .unwrap_or_else(|_| panic!("insufficient privileges"));
+            .unwrap_or_else(|_| panic_with_error!(&e, ContractError::NotAdmin));
 
         // Check if new admin already exists
         if e.storage()
             .instance()
             .has(&DataKey::AdminInfo(new_admin.clone()))
         {
-            panic!("address is already an admin");
+            panic_with_error!(&e, ContractError::AlreadyActive);
         }
 
         // Prevent self-assignment of equal or higher role
         if caller == new_admin && Self::get_role(e.clone(), caller.clone()) >= role {
-            panic!("cannot assign equal or higher role to self");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         // Check admin limit
@@ -205,7 +207,7 @@ impl AdminContract {
             .get(&DataKey::MaxAdmins)
             .unwrap_or(100);
         if current_count >= max_admins {
-            panic!("maximum admin limit reached");
+            panic_with_error!(&e, ContractError::ThresholdExceedsSigners);
         }
 
         // Create admin info
@@ -271,12 +273,12 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::AdminInfo(admin_to_remove.clone()))
-            .unwrap_or_else(|| panic!("admin not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotAdmin));
 
         // Verify caller authorization
         let caller_role = Self::get_role(e.clone(), caller.clone());
         if caller_role <= admin_info.role {
-            panic!("insufficient privileges to remove admin");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         // Check minimum admin requirements
@@ -290,7 +292,7 @@ impl AdminContract {
 
         // Special protection for super admins
         if admin_info.role == AdminRole::SuperAdmin && role_admins.len() <= min_admins {
-            panic!("cannot remove last super admin");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
 
         // Remove from admin info storage
@@ -306,7 +308,7 @@ impl AdminContract {
             .unwrap_or(Vec::new(&e));
         let admin_index = admin_list.iter().position(|x| x == admin_to_remove);
         if let Some(index) = admin_index {
-            admin_list.remove(index.try_into().unwrap());
+            admin_list.remove(index.try_into().unwrap_or_else(|_| panic_with_error!(&e, ContractError::Overflow)));
             e.storage().instance().set(&DataKey::AdminList, &admin_list);
         }
 
@@ -318,7 +320,7 @@ impl AdminContract {
             .unwrap_or(Vec::new(&e));
         let role_index = role_admins.iter().position(|x| x == admin_to_remove);
         if let Some(index) = role_index {
-            role_admins.remove(index.try_into().unwrap());
+            role_admins.remove(index.try_into().unwrap_or_else(|_| panic_with_error!(&e, ContractError::Overflow)));
             e.storage()
                 .instance()
                 .set(&DataKey::RoleAdmins(admin_info.role), &role_admins);
@@ -359,15 +361,15 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::AdminInfo(admin_address.clone()))
-            .unwrap_or_else(|| panic!("admin not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotAdmin));
 
         // Verify caller authorization
         Self::require_role_at_least(&e, &caller, Self::get_required_role_to_assign(new_role))
-            .unwrap_or_else(|_| panic!("insufficient privileges"));
+            .unwrap_or_else(|_| panic_with_error!(&e, ContractError::NotAdmin));
 
         // Prevent self-assignment of equal or higher role
         if caller == admin_address && Self::get_role(e.clone(), caller.clone()) >= new_role {
-            panic!("cannot assign equal or higher role to self");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         let old_role = admin_info.role;
@@ -380,7 +382,7 @@ impl AdminContract {
             .unwrap_or(Vec::new(&e));
         let old_index = old_role_admins.iter().position(|x| x == admin_address);
         if let Some(index) = old_index {
-            old_role_admins.remove(index.try_into().unwrap());
+            old_role_admins.remove(index.try_into().unwrap_or_else(|_| panic_with_error!(&e, ContractError::Overflow)));
             e.storage()
                 .instance()
                 .set(&DataKey::RoleAdmins(old_role), &old_role_admins);
@@ -437,17 +439,17 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::AdminInfo(admin_address.clone()))
-            .unwrap_or_else(|| panic!("admin not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotAdmin));
 
         // Verify caller authorization
         let caller_role = Self::get_role(e.clone(), caller.clone());
         // Allow deactivation when caller has the same role as the target.
         if caller_role < admin_info.role {
-            panic!("insufficient privileges to deactivate admin");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         if !admin_info.active {
-            panic!("admin already deactivated");
+            panic_with_error!(&e, ContractError::AlreadyDeactivated);
         }
 
         admin_info.active = false;
@@ -481,17 +483,17 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::AdminInfo(admin_address.clone()))
-            .unwrap_or_else(|| panic!("admin not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotAdmin));
 
         // Verify caller authorization
         let caller_role = Self::get_role(e.clone(), caller.clone());
         // Allow reactivation when caller has the same role as the target.
         if caller_role < admin_info.role {
-            panic!("insufficient privileges to reactivate admin");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         if admin_info.active {
-            panic!("admin already active");
+            panic_with_error!(&e, ContractError::AlreadyActive);
         }
 
         admin_info.active = true;
@@ -531,16 +533,16 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::Owner)
-            .unwrap_or_else(|| panic!("owner not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
 
         // Verify caller is the current owner
         if caller != current_owner {
-            panic!("only current owner can transfer ownership");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         // Verify new owner is different from current owner
         if new_owner == current_owner {
-            panic!("new owner must be different from current owner");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
 
         // Verify new owner is a SuperAdmin
@@ -548,14 +550,14 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::AdminInfo(new_owner.clone()))
-            .unwrap_or_else(|| panic!("new owner must be an existing admin"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotAdmin));
 
         if new_owner_info.role != AdminRole::SuperAdmin {
-            panic!("new owner must have SuperAdmin role");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         if !new_owner_info.active {
-            panic!("new owner must be active");
+            panic_with_error!(&e, ContractError::AlreadyDeactivated);
         }
 
         // Store pending owner
@@ -593,11 +595,11 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::PendingOwner)
-            .unwrap_or_else(|| panic!("no pending owner"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
 
         // Verify caller is the pending owner
         if caller != pending_owner {
-            panic!("only pending owner can accept ownership");
+            panic_with_error!(&e, ContractError::NotAdmin);
         }
 
         // Get current owner for event emission
@@ -605,7 +607,7 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::Owner)
-            .unwrap_or_else(|| panic!("owner not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
 
         // Transfer ownership
         e.storage()
@@ -632,7 +634,7 @@ impl AdminContract {
         e.storage()
             .instance()
             .get(&DataKey::Owner)
-            .unwrap_or_else(|| panic!("owner not found"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized))
     }
 
     /// Get the pending owner (if any) for the current ownership transfer.
@@ -657,7 +659,7 @@ impl AdminContract {
         e.storage()
             .instance()
             .get(&DataKey::AdminInfo(admin_address))
-            .unwrap_or_else(|| panic!("admin not found"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotAdmin))
     }
 
     /// Check if an address is an admin and return their role.
@@ -672,7 +674,7 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::AdminInfo(address))
-            .unwrap_or_else(|| panic!("address is not an admin"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotAdmin));
         admin_info.role
     }
 
@@ -776,12 +778,12 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::MinAdmins)
-            .unwrap_or_else(|| panic!("contract not initialized - min_admins not set"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
         let max_admins: u32 = e
             .storage()
             .instance()
             .get(&DataKey::MaxAdmins)
-            .unwrap_or_else(|| panic!("contract not initialized - max_admins not set"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized));
         (min_admins, max_admins)
     }
 
@@ -793,7 +795,7 @@ impl AdminContract {
             .storage()
             .instance()
             .get(&DataKey::AdminInfo(address))
-            .unwrap_or_else(|| panic!("address is not an admin"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotAdmin));
         admin_info.role
     }
 

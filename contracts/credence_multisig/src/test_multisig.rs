@@ -41,7 +41,7 @@ fn test_initialize() {
 }
 
 #[test]
-#[should_panic(expected = "signers list cannot be empty")]
+#[should_panic(expected = "Error(Contract, #601)")]
 fn test_initialize_empty_signers() {
     let e = Env::default();
     e.mock_all_auths();
@@ -55,7 +55,7 @@ fn test_initialize_empty_signers() {
 }
 
 #[test]
-#[should_panic(expected = "invalid threshold")]
+#[should_panic(expected = "Error(Contract, #601)")]
 fn test_initialize_threshold_zero() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -64,7 +64,7 @@ fn test_initialize_threshold_zero() {
 }
 
 #[test]
-#[should_panic(expected = "invalid threshold")]
+#[should_panic(expected = "Error(Contract, #601)")]
 fn test_initialize_threshold_exceeds_signers() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -88,7 +88,7 @@ fn test_add_signer() {
 }
 
 #[test]
-#[should_panic(expected = "signer already exists")]
+#[should_panic(expected = "Error(Contract, #405)")]
 fn test_add_duplicate_signer() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -111,7 +111,7 @@ fn test_remove_signer() {
 }
 
 #[test]
-#[should_panic(expected = "signer does not exist")]
+#[should_panic(expected = "Error(Contract, #104)")]
 fn test_remove_nonexistent_signer() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -122,7 +122,7 @@ fn test_remove_nonexistent_signer() {
 }
 
 #[test]
-#[should_panic(expected = "cannot remove last signer")]
+#[should_panic(expected = "Error(Contract, #107)")]
 fn test_remove_last_signer() {
     let e = Env::default();
     let (client, admin, _) = setup(&e);
@@ -159,7 +159,7 @@ fn test_set_threshold() {
 }
 
 #[test]
-#[should_panic(expected = "invalid threshold")]
+#[should_panic(expected = "Error(Contract, #601)")]
 fn test_set_threshold_zero() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -169,7 +169,7 @@ fn test_set_threshold_zero() {
 }
 
 #[test]
-#[should_panic(expected = "invalid threshold")]
+#[should_panic(expected = "Error(Contract, #601)")]
 fn test_set_threshold_exceeds_signers() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -210,7 +210,7 @@ fn test_submit_proposal() {
 }
 
 #[test]
-#[should_panic(expected = "not a signer")]
+#[should_panic(expected = "Error(Contract, #104)")]
 fn test_submit_proposal_non_signer() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -232,7 +232,7 @@ fn test_submit_proposal_non_signer() {
 }
 
 #[test]
-#[should_panic(expected = "description cannot be empty")]
+#[should_panic(expected = "Error(Contract, #107)")]
 fn test_submit_proposal_empty_description() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -316,7 +316,7 @@ fn test_sign_proposal() {
 }
 
 #[test]
-#[should_panic(expected = "not a signer")]
+#[should_panic(expected = "Error(Contract, #104)")]
 fn test_sign_proposal_non_signer() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -340,7 +340,7 @@ fn test_sign_proposal_non_signer() {
 }
 
 #[test]
-#[should_panic(expected = "proposal not found")]
+#[should_panic(expected = "Error(Contract, #603)")]
 fn test_sign_nonexistent_proposal() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -351,7 +351,7 @@ fn test_sign_nonexistent_proposal() {
 }
 
 #[test]
-#[should_panic(expected = "already signed")]
+#[should_panic(expected = "Error(Contract, #405)")]
 fn test_double_sign() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -431,7 +431,7 @@ fn test_execute_proposal() {
 }
 
 #[test]
-#[should_panic(expected = "insufficient signatures to execute")]
+#[should_panic(expected = "Error(Contract, #605)")]
 fn test_execute_proposal_insufficient_signatures() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -456,7 +456,7 @@ fn test_execute_proposal_insufficient_signatures() {
 }
 
 #[test]
-#[should_panic(expected = "proposal not found")]
+#[should_panic(expected = "Error(Contract, #603)")]
 fn test_execute_nonexistent_proposal() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -466,7 +466,7 @@ fn test_execute_nonexistent_proposal() {
 }
 
 #[test]
-#[should_panic(expected = "proposal is not pending")]
+#[should_panic(expected = "Error(Contract, #604)")]
 fn test_execute_already_executed() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -549,7 +549,7 @@ fn test_reject_proposal() {
 }
 
 #[test]
-#[should_panic(expected = "proposal is not pending")]
+#[should_panic(expected = "Error(Contract, #604)")]
 fn test_reject_already_rejected() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -573,7 +573,7 @@ fn test_reject_already_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "proposal is not pending")]
+#[should_panic(expected = "Error(Contract, #604)")]
 fn test_sign_rejected_proposal() {
     let e = Env::default();
     let (client, admin, signers) = setup(&e);
@@ -599,7 +599,7 @@ fn test_sign_rejected_proposal() {
 // ==================== Expiration Tests ====================
 
 #[test]
-#[should_panic(expected = "proposal has expired")]
+#[should_panic(expected = "Error(Contract, #604)")]
 fn test_sign_expired_proposal() {
     let e = Env::default();
     e.ledger().with_mut(|li| {
@@ -630,7 +630,7 @@ fn test_sign_expired_proposal() {
 }
 
 #[test]
-#[should_panic(expected = "proposal has expired")]
+#[should_panic(expected = "Error(Contract, #604)")]
 fn test_execute_expired_proposal() {
     let e = Env::default();
     e.ledger().with_mut(|li| {

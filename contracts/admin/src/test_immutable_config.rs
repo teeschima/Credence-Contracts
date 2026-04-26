@@ -102,7 +102,7 @@ mod immutable_config_tests {
             
             assert!(result.is_err());
             let panic_msg = result.unwrap_err().downcast::<String>().unwrap();
-            assert!(panic_msg.contains("already initialized"));
+            assert!(panic_msg.contains("Error(Contract, #2)"));
         });
     }
 }

@@ -162,7 +162,7 @@ fn test_rescue_native_zero_amount() {
 }
 
 #[test]
-#[should_panic(expected = "rescue amount exceeds available balance")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_rescue_native_exceeds_available() {
     let e = Env::default();
     let (client, admin, _token) = setup(&e);
@@ -562,7 +562,7 @@ fn test_execute_withdrawal_min_amount_out_below_proposal_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "slippage: received amount below minimum")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_execute_withdrawal_slippage_reverts_when_below_min() {
     // min_amount_out > proposal.amount → must revert.
     let (_e, client, id) = setup_ready_proposal(500);
@@ -570,7 +570,7 @@ fn test_execute_withdrawal_slippage_reverts_when_below_min() {
 }
 
 #[test]
-#[should_panic(expected = "slippage: received amount below minimum")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_execute_withdrawal_slippage_reverts_adversarial_large_min() {
     // Adversarial: caller sets an unreachably high min_amount_out.
     let (_e, client, id) = setup_ready_proposal(100);

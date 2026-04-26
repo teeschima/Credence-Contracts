@@ -133,7 +133,7 @@ fn test_independent_delegation_types() {
 }
 
 #[test]
-#[should_panic(expected = "already initialized")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_double_initialize() {
     let (e, client) = setup();
     let admin2 = Address::generate(&e);
@@ -141,7 +141,7 @@ fn test_double_initialize() {
 }
 
 #[test]
-#[should_panic(expected = "expiry must be in the future")]
+#[should_panic(expected = "Error(Contract, #500)")]
 fn test_delegate_with_past_expiry() {
     let (e, client) = setup();
     e.ledger().with_mut(|li| {
@@ -154,7 +154,7 @@ fn test_delegate_with_past_expiry() {
 }
 
 #[test]
-#[should_panic(expected = "delegation not found")]
+#[should_panic(expected = "Error(Contract, #501)")]
 fn test_get_nonexistent_delegation() {
     let (e, client) = setup();
     let owner = Address::generate(&e);
@@ -163,7 +163,7 @@ fn test_get_nonexistent_delegation() {
 }
 
 #[test]
-#[should_panic(expected = "already revoked")]
+#[should_panic(expected = "Error(Contract, #502)")]
 fn test_double_revoke() {
     let (e, client) = setup();
     let owner = Address::generate(&e);
@@ -252,9 +252,9 @@ fn test_revoke_attestation_is_valid_false() {
     assert!(!client.is_valid_delegate(&attester, &subject, &DelegationType::Attestation));
 }
 
-/// Revoking an attestation that was never issued must panic with `"attestation not found"`.
+/// Revoking an attestation that was never issued must panic with `"Error(Contract, #501)"`.
 #[test]
-#[should_panic(expected = "attestation not found")]
+#[should_panic(expected = "Error(Contract, #501)")]
 fn test_revoke_attestation_not_found() {
     let (e, client) = setup();
     let attester = Address::generate(&e);
@@ -263,9 +263,9 @@ fn test_revoke_attestation_not_found() {
     client.revoke_attestation(&attester, &subject);
 }
 
-/// Double-revoking an attestation must panic with `"attestation already revoked"`.
+/// Double-revoking an attestation must panic with `"Error(Contract, #502)"`.
 #[test]
-#[should_panic(expected = "attestation already revoked")]
+#[should_panic(expected = "Error(Contract, #502)")]
 fn test_revoke_attestation_double_revoke() {
     let (e, client) = setup();
     let attester = Address::generate(&e);

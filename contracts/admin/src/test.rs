@@ -75,7 +75,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "already initialized")]
+    #[should_panic(expected = "Error(Contract, #2)")]
     fn test_double_initialization() {
         let env = Env::default();
         let (contract_address, super_admin) = setup_contract(&env);
@@ -87,7 +87,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "min_admins cannot be zero")]
+    #[should_panic(expected = "Error(Contract, #107)")]
     fn test_initialize_rejects_min_admins_zero() {
         let env = Env::default();
         let contract = create_contract();
@@ -101,7 +101,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "min_admins cannot be greater than max_admins")]
+    #[should_panic(expected = "Error(Contract, #107)")]
     fn test_initialize_rejects_min_greater_than_max() {
         let env = Env::default();
         let contract = create_contract();
@@ -148,7 +148,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient privileges")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_add_admin_rejects_insufficient_privileges() {
         let env = Env::default();
         let (contract_address, _super_admin, admin, _operator) = setup_multiple_admins(&env);
@@ -166,7 +166,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "address is already an admin")]
+    #[should_panic(expected = "Error(Contract, #405)")]
     fn test_add_admin_rejects_duplicate_admin() {
         let env = Env::default();
         let (contract_address, super_admin, admin, _operator) = setup_multiple_admins(&env);
@@ -183,7 +183,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "maximum admin limit reached")]
+    #[should_panic(expected = "Error(Contract, #601)")]
     fn test_add_admin_respects_max_limit() {
         let env = Env::default();
         let (contract_address, super_admin) = setup_with_limits(&env, 1, 2);
@@ -213,7 +213,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "address is already an admin")]
+    #[should_panic(expected = "Error(Contract, #405)")]
     fn test_add_admin_rejects_self_add_as_duplicate_admin() {
         let env = Env::default();
         let (contract_address, super_admin) = setup_contract(&env);
@@ -248,7 +248,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "admin not found")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_remove_admin_rejects_non_admin_target() {
         let env = Env::default();
         let (contract_address, super_admin) = setup_contract(&env);
@@ -261,7 +261,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient privileges to remove admin")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_remove_admin_rejects_insufficient_privileges() {
         let env = Env::default();
         let (contract_address, _super_admin, admin, operator) = setup_multiple_admins(&env);
@@ -273,7 +273,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient privileges to remove admin")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_remove_admin_rejects_removing_super_admin() {
         let env = Env::default();
         let (contract_address, super_admin) = setup_with_limits(&env, 1, 100);
@@ -319,7 +319,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient privileges")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_update_admin_role_rejects_insufficient_privileges() {
         let env = Env::default();
         let (contract_address, _super_admin, admin, operator) = setup_multiple_admins(&env);
@@ -336,7 +336,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "admin not found")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_update_admin_role_rejects_non_admin_target() {
         let env = Env::default();
         let (contract_address, super_admin) = setup_contract(&env);
@@ -354,7 +354,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "cannot assign equal or higher role to self")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_update_admin_role_prevents_self_assign_equal_or_higher() {
         let env = Env::default();
         let (contract_address, super_admin) = setup_contract(&env);
@@ -428,7 +428,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient privileges to deactivate admin")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_deactivate_admin_rejects_insufficient_privileges() {
         let env = Env::default();
         let (contract_address, _super_admin, admin, operator) = setup_multiple_admins(&env);
@@ -440,7 +440,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "admin already deactivated")]
+    #[should_panic(expected = "Error(Contract, #404)")]
     fn test_deactivate_admin_rejects_double_deactivate() {
         let env = Env::default();
         let (contract_address, super_admin, admin, _) = setup_multiple_admins(&env);
@@ -457,7 +457,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "insufficient privileges to reactivate admin")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_reactivate_admin_rejects_insufficient_privileges() {
         let env = Env::default();
         let (contract_address, super_admin, admin, operator) = setup_multiple_admins(&env);
@@ -474,7 +474,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "admin already active")]
+    #[should_panic(expected = "Error(Contract, #405)")]
     fn test_reactivate_admin_rejects_when_already_active() {
         let env = Env::default();
         let (contract_address, super_admin, admin, _) = setup_multiple_admins(&env);
@@ -574,7 +574,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "admin not found")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_get_admin_info_panics_for_non_admin() {
         let env = Env::default();
         let (contract_address, _super_admin) = setup_contract(&env);
@@ -586,7 +586,7 @@ mod comprehensive_tests {
     }
 
     #[test]
-    #[should_panic(expected = "address is not an admin")]
+    #[should_panic(expected = "Error(Contract, #100)")]
     fn test_get_admin_role_panics_for_non_admin() {
         let env = Env::default();
         let (contract_address, _super_admin) = setup_contract(&env);

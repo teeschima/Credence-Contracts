@@ -5,7 +5,11 @@
 //! and execution at threshold. Can be used for any administrative action requiring
 //! multi-party approval.
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, String, Symbol, Vec};
+use credence_errors::ContractError;
+use soroban_sdk::{
+    contract, contractimpl, contracttype, panic_with_error, Address, Bytes, Env, String, Symbol,
+    Vec,
+};
 
 /// Type of action that can be proposed and executed.
 #[contracttype]
@@ -119,12 +123,12 @@ impl CredenceMultiSig {
         admin.require_auth();
 
         if signers.is_empty() {
-            panic!("signers list cannot be empty");
+            panic_with_error!(&e, ContractError::ThresholdExceedsSigners);
         }
 
         let signer_count = signers.len();
         if threshold == 0 || threshold > signer_count {
-            panic!("invalid threshold: must be 1 <= threshold <= signer count");
+            panic_with_error!(&e, ContractError::ThresholdExceedsSigners);
         }
 
         e.storage().instance().set(&DataKey::Admin, &admin);
@@ -180,7 +184,7 @@ impl CredenceMultiSig {
             .unwrap_or(false);
 
         if already {
-            panic!("signer already exists");
+            panic_with_error!(&e, ContractError::AlreadyActive);
         }
 
         e.storage()
@@ -192,7 +196,9 @@ impl CredenceMultiSig {
             .instance()
             .get(&DataKey::SignerCount)
             .unwrap_or(0);
-        let new_count = count.checked_add(1).expect("signer count overflow");
+        let new_count = count
+            .checked_add(1)
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
         e.storage()
             .instance()
             .set(&DataKey::SignerCount, &new_count);
@@ -236,7 +242,7 @@ impl CredenceMultiSig {
             .unwrap_or(false);
 
         if !exists {
-            panic!("signer does not exist");
+            panic_with_error!(&e, ContractError::NotSigner);
         }
 
         let count: u32 = e
@@ -246,7 +252,7 @@ impl CredenceMultiSig {
             .unwrap_or(1);
 
         if count <= 1 {
-            panic!("cannot remove last signer");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
 
         e.storage()
@@ -306,7 +312,7 @@ impl CredenceMultiSig {
             .unwrap_or(0);
 
         if threshold == 0 || threshold > count {
-            panic!("invalid threshold: must be 1 <= threshold <= signer count");
+            panic_with_error!(&e, ContractError::ThresholdExceedsSigners);
         }
 
         e.storage().instance().set(&DataKey::Threshold, &threshold);
@@ -351,7 +357,7 @@ impl CredenceMultiSig {
         Self::require_signer(&e, &proposer);
 
         if description.len() == 0 {
-            panic!("description cannot be empty");
+            panic_with_error!(&e, ContractError::InvalidPauseAction);
         }
 
         let id: u64 = e
@@ -359,7 +365,9 @@ impl CredenceMultiSig {
             .instance()
             .get(&DataKey::ProposalCounter)
             .unwrap_or(0);
-        let next_id = id.checked_add(1).expect("proposal counter overflow");
+        let next_id = id
+            .checked_add(1)
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
         e.storage()
             .instance()
             .set(&DataKey::ProposalCounter, &next_id);
@@ -418,14 +426,14 @@ impl CredenceMultiSig {
             .storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
-            .unwrap_or_else(|| panic!("proposal not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::ProposalNotFound));
 
         if proposal.status != ProposalStatus::Pending {
-            panic!("proposal is not pending");
+            panic_with_error!(&e, ContractError::ProposalAlreadyExecuted);
         }
 
         if proposal.expires_at > 0 && e.ledger().timestamp() >= proposal.expires_at {
-            panic!("proposal has expired");
+            panic_with_error!(&e, ContractError::ProposalAlreadyExecuted);
         }
 
         let already_signed = e
@@ -435,7 +443,7 @@ impl CredenceMultiSig {
             .unwrap_or(false);
 
         if already_signed {
-            panic!("already signed");
+            panic_with_error!(&e, ContractError::AlreadyActive);
         }
 
         e.storage()
@@ -447,7 +455,9 @@ impl CredenceMultiSig {
             .instance()
             .get(&DataKey::SignatureCount(proposal_id))
             .unwrap_or(0);
-        let new_count = count.checked_add(1).expect("signature count overflow");
+        let new_count = count
+            .checked_add(1)
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::Overflow));
         e.storage()
             .instance()
             .set(&DataKey::SignatureCount(proposal_id), &new_count);
@@ -483,15 +493,15 @@ impl CredenceMultiSig {
             .storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
-            .unwrap_or_else(|| panic!("proposal not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::ProposalNotFound));
 
         if proposal.status != ProposalStatus::Pending {
-            panic!("proposal is not pending");
+            panic_with_error!(&e, ContractError::ProposalAlreadyExecuted);
         }
 
         if proposal.expires_at > 0 && e.ledger().timestamp() >= proposal.expires_at {
             Self::expire_proposal(&e, proposal_id);
-            panic!("proposal has expired");
+            panic_with_error!(&e, ContractError::ProposalAlreadyExecuted);
         }
 
         let threshold: u32 = e.storage().instance().get(&DataKey::Threshold).unwrap_or(0);
@@ -502,7 +512,7 @@ impl CredenceMultiSig {
             .unwrap_or(0);
 
         if signatures < threshold {
-            panic!("insufficient signatures to execute");
+            panic_with_error!(&e, ContractError::InsufficientApprovals);
         }
 
         proposal.status = ProposalStatus::Executed;
@@ -537,10 +547,10 @@ impl CredenceMultiSig {
             .storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
-            .unwrap_or_else(|| panic!("proposal not found"));
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::ProposalNotFound));
 
         if proposal.status != ProposalStatus::Pending {
-            panic!("proposal is not pending");
+            panic_with_error!(&e, ContractError::ProposalAlreadyExecuted);
         }
 
         proposal.status = ProposalStatus::Rejected;
@@ -559,7 +569,7 @@ impl CredenceMultiSig {
         e.storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
-            .unwrap_or_else(|| panic!("proposal not found"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::ProposalNotFound))
     }
 
     /// Get current signature count for a proposal.
@@ -612,7 +622,7 @@ impl CredenceMultiSig {
         e.storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("not initialized"))
+            .unwrap_or_else(|| panic_with_error!(&e, ContractError::NotInitialized))
     }
 
     // ==================== Internal Helpers ====================
@@ -623,9 +633,9 @@ impl CredenceMultiSig {
             .storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("not initialized"));
+            .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
         if stored_admin != *admin {
-            panic!("not admin");
+            panic_with_error!(e, ContractError::NotAdmin);
         }
     }
 
@@ -636,7 +646,7 @@ impl CredenceMultiSig {
             .get(&DataKey::Signer(signer.clone()))
             .unwrap_or(false);
         if !is_signer {
-            panic!("not a signer");
+            panic_with_error!(e, ContractError::NotSigner);
         }
     }
 
@@ -645,7 +655,7 @@ impl CredenceMultiSig {
             .storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
-            .unwrap_or_else(|| panic!("proposal not found"));
+            .unwrap_or_else(|| panic_with_error!(e, ContractError::ProposalNotFound));
 
         proposal.status = ProposalStatus::Expired;
         e.storage()

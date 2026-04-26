@@ -6,6 +6,7 @@ version = 4
 name = "admin"
 version = "0.1.0"
 dependencies = [
+ "credence_errors",
  "soroban-sdk 22.0.10",
 ]
 
@@ -295,6 +296,7 @@ dependencies = [
 name = "credence_arbitration"
 version = "0.1.0"
 dependencies = [
+ "credence_errors",
  "soroban-sdk 22.0.10",
 ]
 
@@ -311,6 +313,7 @@ dependencies = [
 name = "credence_delegation"
 version = "0.1.0"
 dependencies = [
+ "credence_errors",
  "soroban-sdk 22.0.10",
 ]
 
@@ -1824,6 +1827,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "templates"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 22.0.10",
 ]
 
 [[package]]

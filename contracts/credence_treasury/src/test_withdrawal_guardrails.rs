@@ -90,7 +90,7 @@ fn test_withdrawal_respects_min_liquidity_floor() {
 }
 
 #[test]
-#[should_panic(expected = "liquidity guard: withdrawal would breach minimum liquidity floor")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_withdrawal_blocked_when_breaching_min_liquidity() {
     let e = Env::default();
     let (client, _admin, signer, recipient, _token) = setup_withdrawal_scenario(&e, 10_000, 3_000);
@@ -102,7 +102,7 @@ fn test_withdrawal_blocked_when_breaching_min_liquidity() {
 }
 
 #[test]
-#[should_panic(expected = "liquidity guard: withdrawal would breach minimum liquidity floor")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_withdrawal_blocked_when_exactly_one_below_floor() {
     let e = Env::default();
     let (client, _admin, signer, recipient, _token) = setup_withdrawal_scenario(&e, 5_000, 1_000);
@@ -140,7 +140,7 @@ fn test_withdrawal_with_zero_min_liquidity() {
 }
 
 #[test]
-#[should_panic(expected = "liquidity guard: withdrawal would breach minimum liquidity floor")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_withdrawal_blocked_with_high_min_liquidity() {
     let e = Env::default();
     let (client, _admin, signer, recipient, _token) = setup_withdrawal_scenario(&e, 10_000, 9_999);
@@ -193,7 +193,7 @@ fn test_multiple_small_withdrawals_respect_cumulative_floor() {
 }
 
 #[test]
-#[should_panic(expected = "liquidity guard: withdrawal would breach minimum liquidity floor")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_sixth_withdrawal_blocked_at_floor() {
     let e = Env::default();
     let (client, _admin, signer, recipient, _token) = setup_withdrawal_scenario(&e, 10_000, 5_000);
@@ -240,7 +240,7 @@ fn test_slippage_guard_accepts_lower_minimum() {
 }
 
 #[test]
-#[should_panic(expected = "slippage: received amount below minimum")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_slippage_guard_rejects_higher_minimum() {
     let e = Env::default();
     let (client, _admin, signer, recipient, _token) = setup_withdrawal_scenario(&e, 10_000, 0);
@@ -253,7 +253,7 @@ fn test_slippage_guard_rejects_higher_minimum() {
 }
 
 #[test]
-#[should_panic(expected = "slippage: received amount below minimum")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_slippage_guard_rejects_max_minimum() {
     let e = Env::default();
     let (client, _admin, signer, recipient, _token) = setup_withdrawal_scenario(&e, 10_000, 0);
@@ -295,7 +295,7 @@ fn test_both_guardrails_liquidity_floor_and_slippage() {
 }
 
 #[test]
-#[should_panic(expected = "liquidity guard: withdrawal would breach minimum liquidity floor")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_liquidity_guard_checked_before_slippage() {
     let e = Env::default();
     let (client, _admin, signer, recipient, _token) = setup_withdrawal_scenario(&e, 10_000, 5_000);
@@ -308,7 +308,7 @@ fn test_liquidity_guard_checked_before_slippage() {
 }
 
 #[test]
-#[should_panic(expected = "slippage: received amount below minimum")]
+#[should_panic(expected = "Error(Contract, #602)")]
 fn test_slippage_guard_checked_after_liquidity() {
     let e = Env::default();
     let (client, _admin, signer, recipient, _token) = setup_withdrawal_scenario(&e, 10_000, 3_000);
