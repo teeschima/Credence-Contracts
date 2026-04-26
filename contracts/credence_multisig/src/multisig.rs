@@ -5,7 +5,7 @@
 //! and execution at threshold. Can be used for any administrative action requiring
 //! multi-party approval.
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, String, Symbol, Vec};
 
 /// Type of action that can be proposed and executed.
 #[contracttype]
@@ -64,6 +64,8 @@ pub struct Proposal {
     pub expires_at: u64,
     /// Custom metadata (flexible storage).
     pub metadata: Option<String>,
+    /// Deterministic hash of the operation payload to prevent replays.
+    pub op_hash: BytesN<32>,
 }
 
 #[contracttype]
@@ -94,6 +96,8 @@ pub enum DataKey {
     PauseProposal(u64),
     PauseApproval(u64, Address),
     PauseApprovalCount(u64),
+    /// Tracks executed operations by their deterministic hash to prevent replay across proposals.
+    ExecutedOp(BytesN<32>),
 }
 
 #[contract]
@@ -107,14 +111,6 @@ impl CredenceMultiSig {
     /// @param admin Address that can manage initial configuration
     /// @param signers Initial list of authorized signers
     /// @param threshold Required number of signatures for execution
-    ///
-    /// # Panics
-    /// * If threshold is 0 or exceeds signer count
-    /// * If signers list is empty
-    /// * If threshold exceeds signer count
-    ///
-    /// # Events
-    /// Emits `multisig_initialized` event
     pub fn initialize(e: Env, admin: Address, signers: Vec<Address>, threshold: u32) {
         admin.require_auth();
 
@@ -158,17 +154,6 @@ impl CredenceMultiSig {
     }
 
     /// Add a new signer. Only admin can add signers.
-    ///
-    /// @param e Contract environment
-    /// @param admin Admin address (must authenticate)
-    /// @param signer Address to add as signer
-    ///
-    /// # Panics
-    /// * If caller is not admin
-    /// * If signer already exists
-    ///
-    /// # Events
-    /// Emits `signer_added` event
     pub fn add_signer(e: Env, admin: Address, signer: Address) {
         crate::pausable::require_not_paused(&e);
         Self::require_admin(&e, &admin);
@@ -212,19 +197,6 @@ impl CredenceMultiSig {
     }
 
     /// Remove a signer. Only admin can remove signers.
-    /// Threshold is auto-capped to new signer count if needed.
-    ///
-    /// @param e Contract environment
-    /// @param admin Admin address (must authenticate)
-    /// @param signer Address to remove
-    ///
-    /// # Panics
-    /// * If caller is not admin
-    /// * If signer doesn't exist
-    /// * If removing would leave zero signers
-    ///
-    /// # Events
-    /// Emits `signer_removed` event
     pub fn remove_signer(e: Env, admin: Address, signer: Address) {
         crate::pausable::require_not_paused(&e);
         Self::require_admin(&e, &admin);
@@ -284,17 +256,6 @@ impl CredenceMultiSig {
     }
 
     /// Set the signature threshold. Only admin can set threshold.
-    ///
-    /// @param e Contract environment
-    /// @param admin Admin address (must authenticate)
-    /// @param threshold New threshold value
-    ///
-    /// # Panics
-    /// * If caller is not admin
-    /// * If threshold is 0 or exceeds signer count
-    ///
-    /// # Events
-    /// Emits `threshold_updated` event
     pub fn set_threshold(e: Env, admin: Address, threshold: u32) {
         crate::pausable::require_not_paused(&e);
         Self::require_admin(&e, &admin);
@@ -316,24 +277,6 @@ impl CredenceMultiSig {
     }
 
     /// Submit a new proposal. Only signers can submit proposals.
-    ///
-    /// @param e Contract environment
-    /// @param proposer Signer submitting the proposal (must authenticate)
-    /// @param action_type Type of action
-    /// @param target Target contract address (optional)
-    /// @param function_name Function to call (optional)
-    /// @param arguments Encoded arguments (optional)
-    /// @param description Human-readable description
-    /// @param expires_at Expiration timestamp (0 for no expiration)
-    /// @param metadata Custom metadata (optional)
-    /// @return Proposal ID
-    ///
-    /// # Panics
-    /// * If caller is not a signer
-    /// * If description is empty
-    ///
-    /// # Events
-    /// Emits `proposal_submitted` event
     pub fn submit_proposal(
         e: Env,
         proposer: Address,
@@ -344,6 +287,7 @@ impl CredenceMultiSig {
         description: String,
         expires_at: u64,
         metadata: Option<String>,
+        op_hash: BytesN<32>,
     ) -> u64 {
         crate::pausable::require_not_paused(&e);
         proposer.require_auth();
@@ -376,6 +320,7 @@ impl CredenceMultiSig {
             status: ProposalStatus::Pending,
             expires_at,
             metadata: metadata.clone(),
+            op_hash: op_hash.clone(),
         };
 
         e.storage()
@@ -387,27 +332,13 @@ impl CredenceMultiSig {
 
         e.events().publish(
             (Symbol::new(&e, "proposal_submitted"), id),
-            (proposer, action_type, description),
+            (proposer, action_type, description, op_hash),
         );
 
         id
     }
 
     /// Sign a proposal. Only signers can sign.
-    ///
-    /// @param e Contract environment
-    /// @param signer Signer address (must authenticate)
-    /// @param proposal_id ID of proposal to sign
-    ///
-    /// # Panics
-    /// * If caller is not a signer
-    /// * If proposal doesn't exist
-    /// * If proposal is not pending
-    /// * If proposal has expired
-    /// * If signer has already signed
-    ///
-    /// # Events
-    /// Emits `proposal_signed` event
     pub fn sign_proposal(e: Env, signer: Address, proposal_id: u64) {
         crate::pausable::require_not_paused(&e);
         signer.require_auth();
@@ -459,24 +390,6 @@ impl CredenceMultiSig {
     }
 
     /// Execute a proposal. Anyone can execute once threshold is met.
-    ///
-    /// @param e Contract environment
-    /// @param proposal_id ID of proposal to execute
-    ///
-    /// # Panics
-    /// * If proposal doesn't exist
-    /// * If proposal is not pending
-    /// * If proposal has expired
-    /// * If signature count < threshold
-    ///
-    /// # Events
-    /// Emits `proposal_executed` event
-    ///
-    /// # Note
-    /// This function marks the proposal as executed but does not perform
-    /// the actual action. The caller should invoke the target contract
-    /// or perform the action after this succeeds. For security, actual
-    /// execution logic should be implemented by the calling contract.
     pub fn execute_proposal(e: Env, proposal_id: u64) {
         crate::pausable::require_not_paused(&e);
         let mut proposal: Proposal = e
@@ -505,30 +418,33 @@ impl CredenceMultiSig {
             panic!("insufficient signatures to execute");
         }
 
+        // Execute-once invariant using deterministic op hash
+        let op_hash = proposal.op_hash.clone();
+        let already_executed = e
+            .storage()
+            .instance()
+            .get(&DataKey::ExecutedOp(op_hash.clone()))
+            .unwrap_or(false);
+
+        if already_executed {
+            panic!("operation already executed");
+        }
+
+        // Mark executed globally to prevent exact replay 
+        e.storage().instance().set(&DataKey::ExecutedOp(op_hash.clone()), &true);
+
         proposal.status = ProposalStatus::Executed;
         e.storage()
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
 
         e.events().publish(
-            (Symbol::new(&e, "proposal_executed"), proposal_id),
+            (Symbol::new(&e, "proposal_executed"), proposal_id, op_hash),
             (proposal.action_type, signatures),
         );
     }
 
     /// Reject a proposal. Only admin can reject.
-    ///
-    /// @param e Contract environment
-    /// @param admin Admin address (must authenticate)
-    /// @param proposal_id ID of proposal to reject
-    ///
-    /// # Panics
-    /// * If caller is not admin
-    /// * If proposal doesn't exist
-    /// * If proposal is not pending
-    ///
-    /// # Events
-    /// Emits `proposal_rejected` event
     pub fn reject_proposal(e: Env, admin: Address, proposal_id: u64) {
         crate::pausable::require_not_paused(&e);
         Self::require_admin(&e, &admin);
@@ -560,6 +476,14 @@ impl CredenceMultiSig {
             .instance()
             .get(&DataKey::Proposal(proposal_id))
             .unwrap_or_else(|| panic!("proposal not found"))
+    }
+
+    /// Check if a deterministic operation hash has already been executed.
+    pub fn is_operation_executed(e: Env, op_hash: BytesN<32>) -> bool {
+        e.storage()
+            .instance()
+            .get(&DataKey::ExecutedOp(op_hash))
+            .unwrap_or(false)
     }
 
     /// Get current signature count for a proposal.

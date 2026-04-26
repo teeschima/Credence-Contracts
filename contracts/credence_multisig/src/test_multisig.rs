@@ -1,7 +1,7 @@
 use crate::{ActionType, CredenceMultiSig, CredenceMultiSigClient, ProposalStatus};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    Address, Env, String, Vec,
+    Address, BytesN, Env, String, Vec,
 };
 
 fn setup(e: &Env) -> (CredenceMultiSigClient, Address, Vec<Address>) {
@@ -198,6 +198,7 @@ fn test_submit_proposal() {
         &description,
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[1; 32]),
     );
 
     assert_eq!(proposal_id, 0);
@@ -228,6 +229,7 @@ fn test_submit_proposal_non_signer() {
         &description,
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[2; 32]),
     );
 }
 
@@ -250,6 +252,7 @@ fn test_submit_proposal_empty_description() {
         &description,
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[3; 32]),
     );
 }
 
@@ -270,6 +273,7 @@ fn test_submit_multiple_proposals() {
         &String::from_str(&e, "Proposal 1"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[4; 32]),
     );
 
     let id2 = client.submit_proposal(
@@ -281,6 +285,7 @@ fn test_submit_multiple_proposals() {
         &String::from_str(&e, "Proposal 2"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[5; 32]),
     );
 
     assert_eq!(id1, 0);
@@ -307,6 +312,7 @@ fn test_sign_proposal() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[6; 32]),
     );
 
     client.sign_proposal(&signer, &proposal_id);
@@ -334,6 +340,7 @@ fn test_sign_proposal_non_signer() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[7; 32]),
     );
 
     client.sign_proposal(&non_signer, &proposal_id);
@@ -369,6 +376,7 @@ fn test_double_sign() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[8; 32]),
     );
 
     client.sign_proposal(&signer, &proposal_id);
@@ -392,6 +400,7 @@ fn test_multiple_signers_sign() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[9; 32]),
     );
 
     client.sign_proposal(&signers.get(0).unwrap(), &proposal_id);
@@ -419,6 +428,7 @@ fn test_execute_proposal() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[10; 32]),
     );
 
     client.sign_proposal(&signers.get(0).unwrap(), &proposal_id);
@@ -448,6 +458,7 @@ fn test_execute_proposal_insufficient_signatures() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[11; 32]),
     );
 
     client.sign_proposal(&signers.get(0).unwrap(), &proposal_id);
@@ -483,6 +494,7 @@ fn test_execute_already_executed() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[12; 32]),
     );
 
     client.sign_proposal(&signers.get(0).unwrap(), &proposal_id);
@@ -490,6 +502,49 @@ fn test_execute_already_executed() {
 
     client.execute_proposal(&proposal_id);
     client.execute_proposal(&proposal_id); // execute again
+}
+
+#[test]
+#[should_panic(expected = "operation already executed")]
+fn test_execute_duplicate_operation() {
+    let e = Env::default();
+    let (client, admin, signers) = setup(&e);
+    client.initialize(&admin, &signers, &2);
+
+    let proposer = signers.get(0).unwrap();
+    let op_hash = BytesN::from_array(&e, &[99; 32]);
+
+    let id1 = client.submit_proposal(
+        &proposer,
+        &ActionType::ConfigChange,
+        &None,
+        &None,
+        &None,
+        &String::from_str(&e, "Prop 1"),
+        &0_u64,
+        &None,
+        &op_hash,
+    );
+
+    client.sign_proposal(&signers.get(0).unwrap(), &id1);
+    client.sign_proposal(&signers.get(1).unwrap(), &id1);
+    client.execute_proposal(&id1);
+
+    let id2 = client.submit_proposal(
+        &proposer,
+        &ActionType::ConfigChange,
+        &None,
+        &None,
+        &None,
+        &String::from_str(&e, "Prop 2 identical"),
+        &0_u64,
+        &None,
+        &op_hash, // Identical operation hash
+    );
+
+    client.sign_proposal(&signers.get(0).unwrap(), &id2);
+    client.sign_proposal(&signers.get(1).unwrap(), &id2);
+    client.execute_proposal(&id2); // Should trigger duplicate execution panic
 }
 
 #[test]
@@ -509,6 +564,7 @@ fn test_execute_with_exact_threshold() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[13; 32]),
     );
 
     client.sign_proposal(&signers.get(0).unwrap(), &proposal_id);
@@ -540,6 +596,7 @@ fn test_reject_proposal() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[14; 32]),
     );
 
     client.reject_proposal(&admin, &proposal_id);
@@ -566,6 +623,7 @@ fn test_reject_already_rejected() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[15; 32]),
     );
 
     client.reject_proposal(&admin, &proposal_id);
@@ -590,6 +648,7 @@ fn test_sign_rejected_proposal() {
         &String::from_str(&e, "Test proposal"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[16; 32]),
     );
 
     client.reject_proposal(&admin, &proposal_id);
@@ -620,6 +679,7 @@ fn test_sign_expired_proposal() {
         &String::from_str(&e, "Test proposal"),
         &1500_u64, // expires at 1500
         &None,
+        &BytesN::from_array(&e, &[17; 32]),
     );
 
     e.ledger().with_mut(|li| {
@@ -651,6 +711,7 @@ fn test_execute_expired_proposal() {
         &String::from_str(&e, "Test proposal"),
         &1500_u64, // expires at 1500
         &None,
+        &BytesN::from_array(&e, &[18; 32]),
     );
 
     client.sign_proposal(&signers.get(0).unwrap(), &proposal_id);
@@ -689,6 +750,7 @@ fn test_threshold_1_of_1() {
         &String::from_str(&e, "Test"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[19; 32]),
     );
 
     client.sign_proposal(&signer, &proposal_id);
@@ -715,6 +777,7 @@ fn test_threshold_3_of_3() {
         &String::from_str(&e, "Test"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[20; 32]),
     );
 
     client.sign_proposal(&signers.get(0).unwrap(), &proposal_id);
@@ -751,6 +814,7 @@ fn test_threshold_2_of_5() {
         &String::from_str(&e, "Test"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[21; 32]),
     );
 
     client.sign_proposal(&signers.get(0).unwrap(), &proposal_id);
@@ -807,6 +871,7 @@ fn test_complex_scenario_multiple_proposals() {
         &String::from_str(&e, "Proposal 1"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[22; 32]),
     );
 
     let id2 = client.submit_proposal(
@@ -818,6 +883,7 @@ fn test_complex_scenario_multiple_proposals() {
         &String::from_str(&e, "Proposal 2"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[23; 32]),
     );
 
     let id3 = client.submit_proposal(
@@ -829,6 +895,7 @@ fn test_complex_scenario_multiple_proposals() {
         &String::from_str(&e, "Proposal 3"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[24; 32]),
     );
 
     // Execute first proposal
@@ -878,6 +945,7 @@ fn test_signer_management_workflow() {
         &String::from_str(&e, "Test"),
         &0_u64,
         &None,
+        &BytesN::from_array(&e, &[25; 32]),
     );
 
     client.sign_proposal(&signers.get(0).unwrap(), &proposal_id);
