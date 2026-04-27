@@ -203,6 +203,13 @@ pub fn force_approve(e: &Env, spender: &Address, amount: i128) {
     safe_approve(e, spender, amount);
 }
 
+/// Atomically transfers tokens and executes an update closure.
+/// In Soroban, all operations within a contract call are inherently atomic.
+pub fn atomic_transfer_and_update<F: FnOnce()>(e: &Env, recipient: &Address, amount: i128, update: F) {
+    safe_transfer(e, recipient, amount);
+    update();
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;

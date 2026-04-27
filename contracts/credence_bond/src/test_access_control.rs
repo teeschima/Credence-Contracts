@@ -26,7 +26,7 @@ pub struct AccessControlHarness;
 #[contractimpl]
 impl AccessControlHarness {
     pub fn initialize(e: Env, admin: Address) {
-        e.storage().instance().set(&symbol_short!("admin"), &admin);
+        e.storage().instance().set(&crate::DataKey::Admin, &admin);
     }
 
     pub fn require_admin_only(e: Env, caller: Address) {

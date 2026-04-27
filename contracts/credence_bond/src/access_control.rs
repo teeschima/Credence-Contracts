@@ -21,8 +21,9 @@
 use soroban_sdk::{Address, Env, Symbol};
 
 /// Storage keys for access control roles
-const ADMIN_KEY: &str = "admin";
-const VERIFIER_PREFIX: &str = "verifier";
+/// Storage keys for access control roles are now derived from crate::DataKey
+// const ADMIN_KEY: &str = "admin";
+// const VERIFIER_PREFIX: &str = "verifier";
 
 /// Event topics for access control
 const ACCESS_DENIED_EVENT: &str = "access_denied";
@@ -54,9 +55,7 @@ pub enum AccessError {
 /// }
 /// ```
 pub fn require_admin(e: &Env, caller: &Address) {
-    let admin_key = Symbol::new(e, ADMIN_KEY);
-
-    match e.storage().instance().get::<Symbol, Address>(&admin_key) {
+    match e.storage().instance().get::<crate::DataKey, Address>(&crate::DataKey::Admin) {
         Some(admin) => {
             if caller != &admin {
                 emit_access_denied(e, caller, "admin", AccessError::NotAdmin);
@@ -88,20 +87,9 @@ pub fn require_admin(e: &Env, caller: &Address) {
 /// }
 /// ```
 pub fn require_verifier(e: &Env, caller: &Address) {
-    let verifier_key = build_verifier_key(e, caller);
-
-    match e
-        .storage()
-        .instance()
-        .get::<(Symbol, Address), bool>(&verifier_key)
-    {
-        Some(true) => {
-            // Caller is a registered verifier
-        }
-        _ => {
-            emit_access_denied(e, caller, "verifier", AccessError::NotVerifier);
-            panic!("not verifier");
-        }
+    if !is_verifier(e, caller) {
+        emit_access_denied(e, caller, "verifier", AccessError::NotVerifier);
+        panic!("not verifier");
     }
 }
 
@@ -148,29 +136,12 @@ pub fn require_identity_owner(e: &Env, caller: &Address, expected_identity: &Add
 /// }
 /// ```
 pub fn require_admin_or_verifier(e: &Env, caller: &Address) {
-    let admin_key = Symbol::new(e, ADMIN_KEY);
-    let is_admin = e
-        .storage()
-        .instance()
-        .get::<Symbol, Address>(&admin_key)
-        .map(|admin| caller == &admin)
-        .unwrap_or(false);
-
-    if is_admin {
+    if is_admin(e, caller) || is_verifier(e, caller) {
         return;
     }
 
-    let verifier_key = build_verifier_key(e, caller);
-    let is_verifier = e
-        .storage()
-        .instance()
-        .get::<(Symbol, Address), bool>(&verifier_key)
-        .unwrap_or(false);
-
-    if !is_verifier {
-        emit_access_denied(e, caller, "admin_or_verifier", AccessError::NotVerifier);
-        panic!("not authorized");
-    }
+    emit_access_denied(e, caller, "admin_or_verifier", AccessError::NotVerifier);
+    panic!("not authorized");
 }
 
 /// @notice Add a verifier (admin only).
@@ -188,32 +159,15 @@ pub fn require_admin_or_verifier(e: &Env, caller: &Address) {
 /// ```
 pub fn add_verifier_role(e: &Env, admin: &Address, verifier: &Address) {
     require_admin(e, admin);
-
-    let verifier_key = build_verifier_key(e, verifier);
-    e.storage().instance().set(&verifier_key, &true);
+    e.storage().instance().set(&crate::DataKey::Attester(verifier.clone()), &true);
 
     e.events()
         .publish((Symbol::new(e, "verifier_added"),), (verifier.clone(),));
 }
 
-/// @notice Remove a verifier (admin only).
-/// @param admin Address expected to match the configured admin.
-/// @param verifier Address to revoke verifier role.
-///
-/// # Panics
-/// Panics if the caller is not admin.
-///
-/// # Example
-/// ```ignore
-/// pub fn remove_verifier(e: Env, admin: Address, verifier: Address) {
-///     remove_verifier_role(&e, &admin, &verifier);
-/// }
-/// ```
 pub fn remove_verifier_role(e: &Env, admin: &Address, verifier: &Address) {
     require_admin(e, admin);
-
-    let verifier_key = build_verifier_key(e, verifier);
-    e.storage().instance().set(&verifier_key, &false);
+    e.storage().instance().set(&crate::DataKey::Attester(verifier.clone()), &false);
 
     e.events()
         .publish((Symbol::new(e, "verifier_removed"),), (verifier.clone(),));
@@ -225,10 +179,9 @@ pub fn remove_verifier_role(e: &Env, admin: &Address, verifier: &Address) {
 /// # Returns
 /// `true` if the address is a registered verifier, `false` otherwise.
 pub fn is_verifier(e: &Env, address: &Address) -> bool {
-    let verifier_key = build_verifier_key(e, address);
     e.storage()
         .instance()
-        .get::<(Symbol, Address), bool>(&verifier_key)
+        .get::<crate::DataKey, bool>(&crate::DataKey::Attester(address.clone()))
         .unwrap_or(false)
 }
 
@@ -238,10 +191,9 @@ pub fn is_verifier(e: &Env, address: &Address) -> bool {
 /// # Returns
 /// `true` if the address is the admin, `false` otherwise.
 pub fn is_admin(e: &Env, address: &Address) -> bool {
-    let admin_key = Symbol::new(e, ADMIN_KEY);
     e.storage()
         .instance()
-        .get::<Symbol, Address>(&admin_key)
+        .get::<crate::DataKey, Address>(&crate::DataKey::Admin)
         .map(|admin| address == &admin)
         .unwrap_or(false)
 }
@@ -252,20 +204,13 @@ pub fn is_admin(e: &Env, address: &Address) -> bool {
 /// # Returns
 /// The admin address if set, or panics if not initialized.
 pub fn get_admin(e: &Env) -> Address {
-    let admin_key = Symbol::new(e, ADMIN_KEY);
     e.storage()
         .instance()
-        .get(&admin_key)
+        .get(&crate::DataKey::Admin)
         .unwrap_or_else(|| panic!("not initialized"))
 }
 
 // Internal helper functions
-
-/// Build a storage key for a verifier address.
-fn build_verifier_key(e: &Env, verifier: &Address) -> (Symbol, Address) {
-    // Use a tuple key with prefix and address for unique verifier storage
-    (Symbol::new(e, VERIFIER_PREFIX), verifier.clone())
-}
 
 /// Emit an access denied event for audit logging.
 fn emit_access_denied(e: &Env, caller: &Address, role: &str, error: AccessError) {

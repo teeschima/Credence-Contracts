@@ -151,65 +151,6 @@ pub struct CooldownRequest {
     pub requested_at: u64,
 }
 
-#[contracttype(export = false)]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DataKey {
-    Admin,
-    Bond,
-    Attester(Address),
-    Attestation(u64),
-    AttestationCounter,
-    SubjectAttestations(Address),
-    SubjectAttestationCount(Address),
-    DuplicateCheck(Address, Address, String),
-    /// Per-identity nonce for replay prevention.
-    Nonce(Address),
-    AttesterStake(Address),
-    CooldownReq(Address),
-    GovernanceNextProposalId,
-    GovernanceProposal(u64),
-    GovernanceVote(u64, Address),
-    GovernanceDelegate(Address),
-    GovernanceGovernors,
-    GovernanceQuorumBps,
-    GovernanceMinGovernors,
-    FeeTreasury,
-    FeeBps,
-    EvidenceCounter,
-    Evidence(u64),
-    ProposalEvidence(u64),
-    HashExists(String),
-    Paused,
-    PauseSigner(Address),
-    PauseSignerCount,
-    PauseThreshold,
-    PauseProposalCounter,
-    PauseProposal(u64),
-    PauseApproval(u64, Address),
-    PauseApprovalCount(u64),
-    PendingClaims(Address),
-    ClaimableAmount(Address),
-    ClaimCounter,
-    ClaimById(u64),
-    BondToken,
-    GraceWindow, // FIX 1: added for configurable post-expiry grace window
-    // Upgrade authorization storage keys
-    TotalSupply,
-    UpgradeAuth(Address),
-    AuthorizedUpgraders,
-    Implementation,
-    UpgradeAdmin,
-    PndgAdmin,
-    PndgUpgrAdmin,
-    UpgradeProposal(u64),
-    NextProposalId,
-    UpgradeHistory,
-    // Supply cap enforcement storage keys
-    SupplyCap,
-    LastCollateralIncreaseLedger,
-    // Borrow freeze
-    BorrowFrozen,
-}
 
 /// Maximum number of bonds that can be created in a single batch.
 pub const MAX_BATCH_BOND_SIZE: u32 = 100;
@@ -563,13 +504,6 @@ impl CredenceBond {
         emergency::get_transition(&e, id)
     }
 
-    pub fn latest_emergency_transition(e: Env) -> u64 {
-        emergency::latest_transition_id(&e)
-    }
-
-    pub fn get_emergency_transition(e: Env, id: u64) -> emergency::EmergencyModeTransition {
-        emergency::get_transition(&e, id)
-    }
 
     /// Propose a new upgrade admin (two-step transfer).
     pub fn transfer_upgrade_admin(e: Env, admin: Address, new_admin: Address) {
@@ -900,10 +834,11 @@ impl CredenceBond {
         let weight = weighted_attestation::compute_weight(&e, &attester);
         let attestation = Attestation {
             id,
-            attester: attester.clone(),
-            subject: subject.clone(),
+            verifier: attester.clone(),
+            identity: subject.clone(),
             timestamp: e.ledger().timestamp(),
             weight,
+            attestation_data: attestation_data.clone(),
             revoked: false,
         };
         attestation.validate();
@@ -968,7 +903,7 @@ impl CredenceBond {
             .instance()
             .get(&key)
             .unwrap_or_else(|| panic!("attestation not found"));
-        if attestation.attester != attester {
+        if attestation.verifier != attester {
             panic!("only original attester can revoke");
         }
         if attestation.revoked {
@@ -980,7 +915,7 @@ impl CredenceBond {
         e.events().publish(
             (
                 Symbol::new(&e, "attestation_revoked"),
-                attestation.subject.clone(),
+                attestation.identity.clone(),
             ),
             (attestation_id, attester),
         );
@@ -2279,8 +2214,6 @@ mod test_helpers;
 #[cfg(test)]
 mod test_immutable_config;
 #[cfg(test)]
-mod test_immutable_config_working;
-#[cfg(test)]
 mod test_increase_bond;
 #[cfg(test)]
 mod test_liquidation_rounding;
@@ -2328,7 +2261,5 @@ mod test_weighted_attestation;
 mod test_withdraw_bond;
 #[cfg(test)]
 mod test_zero_address;
-#[cfg(test)]
-mod test_zero_address_working;
 #[cfg(test)]
 mod token_integration_test;

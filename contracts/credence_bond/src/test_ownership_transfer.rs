@@ -81,7 +81,7 @@ fn test_upgrade_admin_transfer_flow() {
     let stored: Address = env.as_contract(&contract_id, || {
         env.storage()
             .instance()
-            .get(&DataKey::UpgradeAdmin)
+            .get(&DataKey::upgrade_admin())
             .unwrap()
     });
     assert_eq!(stored, admin);
@@ -99,7 +99,7 @@ fn test_upgrade_admin_transfer_flow() {
     let stored: Address = env.as_contract(&contract_id, || {
         env.storage()
             .instance()
-            .get(&DataKey::UpgradeAdmin)
+            .get(&DataKey::upgrade_admin())
             .unwrap()
     });
     assert_eq!(stored, new_admin);

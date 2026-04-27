@@ -3,6 +3,7 @@
 //! Rejects fee-on-transfer tokens where balance verification fails.
 
 use crate::DataKey;
+use crate::safe_token;
 use soroban_sdk::{Address, Env, String, Symbol};
 
 /// Stellar network passphrase label used for USDC mainnet references.

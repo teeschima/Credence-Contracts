@@ -336,14 +336,7 @@ pub fn process_claims(
 
     // Transfer tokens to user using safe token operations
     if total_amount > 0 {
-        let token: Address = e
-            .storage()
-            .instance()
-            .get(&DataKey::BondToken)
-            .expect("token not configured");
-
-        let contract = e.current_contract_address();
-        soroban_sdk::token::TokenClient::new(e, &token).transfer(&contract, user, &total_amount);
+        crate::safe_token::safe_transfer(e, user, total_amount);
     }
 
     let result = ClaimResult {
