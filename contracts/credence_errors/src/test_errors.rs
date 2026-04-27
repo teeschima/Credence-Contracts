@@ -14,6 +14,9 @@ mod tests {
             ContractError::NotOriginalAttester,
             ContractError::NotSigner,
             ContractError::UnauthorizedDepositor,
+            ContractError::ContractPaused,
+            ContractError::InvalidPauseAction,
+            ContractError::InsufficientSignatures,
             ContractError::BondNotFound,
             ContractError::BondNotActive,
             ContractError::InsufficientBalance,
@@ -26,6 +29,8 @@ mod tests {
             ContractError::NegativeStake,
             ContractError::EarlyExitConfigNotSet,
             ContractError::InvalidPenaltyBps,
+            ContractError::LeverageExceeded,
+            ContractError::UnsupportedToken,
             ContractError::DuplicateAttestation,
             ContractError::AttestationNotFound,
             ContractError::AttestationAlreadyRevoked,
@@ -37,6 +42,7 @@ mod tests {
             ContractError::BondContractNotRegistered,
             ContractError::AlreadyDeactivated,
             ContractError::AlreadyActive,
+            ContractError::InvalidContractAddress,
             ContractError::ExpiryInPast,
             ContractError::DelegationNotFound,
             ContractError::AlreadyRevoked,
@@ -46,6 +52,8 @@ mod tests {
             ContractError::ProposalNotFound,
             ContractError::ProposalAlreadyExecuted,
             ContractError::InsufficientApprovals,
+            ContractError::InvalidFlashLoanCallback,
+            ContractError::FlashLoanRepaymentFailed,
             ContractError::Overflow,
             ContractError::Underflow,
         ]
@@ -67,6 +75,9 @@ mod tests {
         assert_eq!(ContractError::NotOriginalAttester as u32, 103);
         assert_eq!(ContractError::NotSigner as u32, 104);
         assert_eq!(ContractError::UnauthorizedDepositor as u32, 105);
+        assert_eq!(ContractError::ContractPaused as u32, 106);
+        assert_eq!(ContractError::InvalidPauseAction as u32, 107);
+        assert_eq!(ContractError::InsufficientSignatures as u32, 108);
     }
 
     #[test]
@@ -83,6 +94,8 @@ mod tests {
         assert_eq!(ContractError::NegativeStake as u32, 209);
         assert_eq!(ContractError::EarlyExitConfigNotSet as u32, 210);
         assert_eq!(ContractError::InvalidPenaltyBps as u32, 211);
+        assert_eq!(ContractError::LeverageExceeded as u32, 212);
+        assert_eq!(ContractError::UnsupportedToken as u32, 213);
     }
 
     #[test]
@@ -102,6 +115,7 @@ mod tests {
         assert_eq!(ContractError::BondContractNotRegistered as u32, 403);
         assert_eq!(ContractError::AlreadyDeactivated as u32, 404);
         assert_eq!(ContractError::AlreadyActive as u32, 405);
+        assert_eq!(ContractError::InvalidContractAddress as u32, 406);
     }
 
     #[test]
@@ -119,6 +133,8 @@ mod tests {
         assert_eq!(ContractError::ProposalNotFound as u32, 603);
         assert_eq!(ContractError::ProposalAlreadyExecuted as u32, 604);
         assert_eq!(ContractError::InsufficientApprovals as u32, 605);
+        assert_eq!(ContractError::InvalidFlashLoanCallback as u32, 606);
+        assert_eq!(ContractError::FlashLoanRepaymentFailed as u32, 607);
     }
 
     #[test]
@@ -342,7 +358,7 @@ mod tests {
     fn test_all_variants_count() {
         assert_eq!(
             all_variants().len(),
-            42,
+            50,
             "Update all_variants() and this count when adding new errors"
         );
     }
@@ -977,6 +993,35 @@ mod tests {
     #[test]
     fn test_execute_ok() {
         assert!(mock_execute(true, false, 3, 2, 50, 100).is_ok());
+    }
+
+    // arithmetic
+    #[test]
+    fn test_insufficient_signatures() {
+        fn mock_multisig_execute(approvals: u32, threshold: u32) -> Result<(), ContractError> {
+            if approvals < threshold {
+                return Err(ContractError::InsufficientSignatures);
+            }
+            Ok(())
+        }
+        assert_eq!(
+            mock_multisig_execute(1, 2),
+            Err(ContractError::InsufficientSignatures)
+        );
+        assert!(mock_multisig_execute(2, 2).is_ok());
+    }
+
+    #[test]
+    fn test_insufficient_signatures_category() {
+        assert_eq!(
+            ContractError::InsufficientSignatures.category(),
+            ErrorCategory::Authorization
+        );
+    }
+
+    #[test]
+    fn test_insufficient_signatures_description() {
+        assert!(!ContractError::InsufficientSignatures.description().is_empty());
     }
 
     // arithmetic

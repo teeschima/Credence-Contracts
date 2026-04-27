@@ -7,7 +7,7 @@ name = "admin"
 version = "0.1.0"
 dependencies = [
  "credence_errors",
- "soroban-sdk 22.0.10",
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -280,7 +280,7 @@ name = "credence_arbitration"
 version = "0.1.0"
 dependencies = [
  "credence_errors",
- "soroban-sdk 22.0.10",
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -297,7 +297,7 @@ name = "credence_delegation"
 version = "0.1.0"
 dependencies = [
  "credence_errors",
- "soroban-sdk 22.0.10",
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -1513,7 +1513,7 @@ dependencies = [
 name = "templates"
 version = "0.1.0"
 dependencies = [
- "soroban-sdk 22.0.10",
+ "soroban-sdk",
 ]
 
 [[package]]
