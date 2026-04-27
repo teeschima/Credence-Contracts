@@ -11,6 +11,13 @@
 //!
 //! Domain binding ties each operation to the specific contract address,
 //! blocking cross-contract replay.
+//!
+//! The nonce validation flow is atomic: deadline and contract-domain checks are
+//! performed before the nonce is consumed, so stale or wrong-context signatures
+//! do not advance the counter.
+//!
+//! Signed actions are bound to the current contract address; this prevents the
+//! same nonce/deadline pair from replaying in a different contract context.
 
 use soroban_sdk::{Address, Env};
 
@@ -76,6 +83,9 @@ pub fn require_not_expired(e: &Env, deadline: u64) {
 /// signed payload to a specific contract address prevents cross-contract replay
 /// where a valid signature for contract A is submitted to contract B.
 ///
+/// The current contract address is compared against the caller-provided
+/// `contract_id` before the nonce is consumed.
+///
 /// # Panics
 /// Panics with "domain mismatch" if `expected_contract` does not match the
 /// current contract address.
@@ -86,12 +96,14 @@ pub fn require_domain_match(e: &Env, expected_contract: &Address) {
     }
 }
 
-/// Validate deadline (+ grace) + domain + consume nonce in one call.
+/// Validate deadline (+ grace), domain, and consume nonce in one atomic call.
 ///
-/// Order of checks:
+/// The order of checks is important:
 /// 1. Deadline — fail fast on expired signatures before touching storage.
-/// 2. Domain   — ensure the payload was signed for this contract.
+/// 2. Domain   — ensure the payload was bound to this contract address.
 /// 3. Nonce    — prevent replay and enforce ordering.
+///
+/// If either deadline or domain validation fails, the nonce is not consumed.
 pub fn validate_and_consume(
     e: &Env,
     identity: &Address,

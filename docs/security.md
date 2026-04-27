@@ -11,6 +11,9 @@ Security mechanisms for the Credence bond and attestation system.
 ## Replay attack prevention
 
 - **Nonces** — Each identity has a nonce (starts at 0). State-changing attestation calls require the current nonce and increment it on success.
+- **Atomic validation** — Deadlines and contract-domain checks are validated before the nonce is consumed, so failed or expired signed actions do not advance the nonce.
+- **Contract-domain binding** — `contract_id` is validated against the current contract address, preventing the same nonce/deadline pair from replaying across different contract deployments.
+- **Signed-action context** — `contract_id`, `deadline`, and `nonce` are all bound to the current contract context before consuming the nonce.
 - **get_nonce(identity)** — Returns the current nonce; the caller must pass this value in the next add_attestation or revoke_attestation call.
 - Replayed or out-of-order transactions are rejected with "invalid nonce" because the stored nonce no longer matches.
 - Nonce overflow is handled by checked arithmetic (panic if increment would overflow).

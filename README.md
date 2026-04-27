@@ -28,10 +28,20 @@ cargo build --target wasm32-unknown-unknown --release -p credence_bond
 
 ## Tests
 
+Run all workspace tests:
+
+```bash
+cargo test --workspace
+```
+
+Run specific contract tests:
+
 ```bash
 cargo test -p credence_bond
 cargo test -p credence_delegation
 ```
+
+The dedicated CI workflow at `.github/workflows/contracts-tests.yml` runs the full workspace tests on every PR.
 
 ## Linting
 

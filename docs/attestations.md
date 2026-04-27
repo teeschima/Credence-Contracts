@@ -19,7 +19,9 @@ Verifiers add credibility attestations to identity bonds. Only authorized attest
 - **add_attestation(attester, subject, attestation_data, nonce)**  
   - Caller must be the attester (require_auth).  
   - Attester must be registered.  
+  - `contract_id` and `deadline` are part of the signed action context and are validated before nonce consumption.  
   - Nonce must match current attester nonce (replay prevention); nonce is incremented on success.  
+  - Signed actions are domain-bound to the contract address to prevent replay across unrelated contract contexts.  
   - Duplicate (same verifier, identity, attestation_data) is rejected.  
   - Weight is computed from attester stake (see weighted attestations).  
   - Emits `attestation_added` with (subject, id, attester, attestation_data, weight).

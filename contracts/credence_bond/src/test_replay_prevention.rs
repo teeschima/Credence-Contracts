@@ -4,6 +4,7 @@
 use crate::*;
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Env, String};
+use std::panic::AssertUnwindSafe;
 
 fn setup(
     e: &Env,
@@ -122,6 +123,62 @@ fn expired_deadline_rejected_on_add_attestation() {
 }
 
 #[test]
+fn expired_deadline_does_not_consume_nonce_on_add_attestation() {
+    let e = Env::default();
+    let (client, attester, contract_id) = setup(&e);
+    let subject = soroban_sdk::Address::generate(&e);
+    let deadline = 1000u64;
+    e.ledger().with_mut(|l| l.timestamp = 2000);
+
+    let initial_nonce = client.get_nonce(&attester);
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        client.add_attestation(
+            &attester,
+            &subject,
+            &String::from_str(&e, "late"),
+            &contract_id,
+            &deadline,
+            &initial_nonce,
+        );
+    }));
+
+    assert!(result.is_err());
+    assert_eq!(client.get_nonce(&attester), initial_nonce);
+}
+
+#[test]
+fn wrong_contract_does_not_consume_nonce_on_revoke() {
+    let e = Env::default();
+    let (client, attester, contract_id) = setup(&e);
+    let subject = soroban_sdk::Address::generate(&e);
+    let deadline = e.ledger().timestamp() + 5000;
+
+    let att = client.add_attestation(
+        &attester,
+        &subject,
+        &String::from_str(&e, "r"),
+        &contract_id,
+        &deadline,
+        &0u64,
+    );
+    let nonce_before = client.get_nonce(&attester);
+    let wrong_contract = soroban_sdk::Address::generate(&e);
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        client.revoke_attestation(
+            &attester,
+            &att.id,
+            &wrong_contract,
+            &deadline,
+            &nonce_before,
+        );
+    }));
+
+    assert!(result.is_err());
+    assert_eq!(client.get_nonce(&attester), nonce_before);
+}
+
+#[test]
 #[should_panic(expected = "signature expired")]
 fn expired_deadline_rejected_on_revoke() {
     let e = Env::default();
@@ -183,6 +240,30 @@ fn wrong_contract_address_rejected_on_add_attestation() {
         &deadline,
         &0u64,
     );
+}
+
+#[test]
+fn wrong_contract_does_not_consume_nonce_on_add_attestation() {
+    let e = Env::default();
+    let (client, attester, _contract_id) = setup(&e);
+    let subject = soroban_sdk::Address::generate(&e);
+    let deadline = e.ledger().timestamp() + 1000;
+    let initial_nonce = client.get_nonce(&attester);
+    let wrong_contract = soroban_sdk::Address::generate(&e);
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        client.add_attestation(
+            &attester,
+            &subject,
+            &String::from_str(&e, "cross"),
+            &wrong_contract,
+            &deadline,
+            &initial_nonce,
+        );
+    }));
+
+    assert!(result.is_err());
+    assert_eq!(client.get_nonce(&attester), initial_nonce);
 }
 
 #[test]
